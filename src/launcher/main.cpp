@@ -138,6 +138,7 @@ int main(int argc, char **argv) {
     BrokerConfig cfg;
     std::vector<std::string> cmd;
     bool saw_dashdash = false;
+    bool supervise_self = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
@@ -147,6 +148,8 @@ int main(int argc, char **argv) {
         }
         if (a == "--") {
             saw_dashdash = true;
+        } else if (a == "--supervise-self") {
+            supervise_self = true;
         } else if (a == "--node" && i + 1 < argc) {
             cfg.self_id = atoi(argv[++i]);
         } else if (a == "--peers" && i + 1 < argc) {
@@ -168,6 +171,62 @@ int main(int argc, char **argv) {
     if (cmd.empty()) {
         fprintf(stderr, "usage: anyreal-run ... -- <command> [args...]\n");
         return 2;
+    }
+
+    auto exec_target = [&]() -> void {
+        std::vector<char *> cargv;
+        for (auto &s : cmd) cargv.push_back(const_cast<char *>(s.c_str()));
+        cargv.push_back(nullptr);
+        execvp(cargv[0], cargv.data());
+        perror("execvp");
+        _exit(127);
+    };
+
+    if (supervise_self) {
+        // The launcher stays PID 1 and execs the target; a forked child runs the
+        // broker. Used to supervise an init process (systemd expects to be PID 1).
+        int sv[2];
+        if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) < 0) {
+            perror("socketpair");
+            return 1;
+        }
+        pid_t pid = fork();
+        if (pid < 0) {
+            perror("fork");
+            return 1;
+        }
+        if (pid == 0) {
+            close(sv[1]);
+            int lfd = recv_fd(sv[0]);
+            close(sv[0]);
+            if (lfd < 0) _exit(1);
+            int rc = run_broker(lfd, 0, cfg);
+            close(lfd);
+            _exit(rc);
+        }
+        close(sv[0]);
+        if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) < 0) {
+            perror("prctl(NO_NEW_PRIVS)");
+            return 1;
+        }
+        std::vector<sock_filter> filter = build_filter();
+        struct sock_fprog prog;
+        prog.len = (unsigned short)filter.size();
+        prog.filter = filter.data();
+        int lfd = (int)syscall(SYS_seccomp, SECCOMP_SET_MODE_FILTER,
+                               SECCOMP_FILTER_FLAG_NEW_LISTENER, &prog);
+        if (lfd < 0) {
+            perror("seccomp");
+            return 1;
+        }
+        if (!send_fd(sv[1], lfd)) {
+            perror("sendmsg");
+            return 1;
+        }
+        close(lfd);
+        close(sv[1]);
+        exec_target();
+        return 127;
     }
 
     int sv[2];

@@ -48,25 +48,34 @@ ARM64 cEOS-lab を REAL controller の中継路で駆動する PoC の結果。�
   - 撤回の反映はホップ数に応じて遅い。検証はポーリングで行う。
   - NOS 全体（systemd/ProcMgr/Sysdb 等）は preload の hijack 対象外で native 動作。
 
+## 混在 4 ノード（GoBGP + cEOS）— MIXED4_PASS
+
+`scripts/experiments/run_mixed4.sh` で、**GoBGP 2 台（seccomp broker 経由）と cEOS 2 台
+（preload 経由）を同一の REAL controller** に接続（line: GoBGP1 - cEOS2 - GoBGP3 - cEOS4）。
+
+- 隣接 session すべて Established（**異実装 BGP の相互接続**）。
+- node1(GoBGP) から広告した `192.168.1.0/24` が node4(cEOS) に到達。AS path は
+  `65003 65002 65001`（GoBGP→cEOS→GoBGP→cEOS を中継）。撤回も成功。
+- これは「runtime 差（Go）と libc 依存 NOS（cEOS）を同じ中継路で同居できる」ことの実証。
+
 ## seccomp broker 版での cEOS 適用（B: 試行）
 
-preload を使わない統一経路として、cEOS の PID1（`/sbin/init`）を `anyreal-run --real` で
-監視する方式も試した（`scripts/experiments/run_b_ceos.sh`）。
+preload を使わない統一経路として、cEOS の PID1 を `anyreal-run --real` で監視する方式も試した
+（`scripts/experiments/run_b_ceos.sh`）。
 
-- broker を **AlmaLinux 9（glibc 2.34）でビルド**して cEOS コンテナへ注入
-  （`build/anyreal-run-ala9`）。
-- broker 側にも preload と同じ **option store/replay** を追加（`setsockopt` を記憶し
-  `getsockopt` で返す）。
-- 結果: cEOS の boot が early に落ちた（systemd が起動を継続できず）。
-  - 原因候補: broker が cEOS の全プロセスの AF_INET/AF_INET6 stream socket を仮想化するため、
-    boot 中の socket パターン（多数・多様なオプション/待機）を満たせていない。
-  - broker は単一スレッドで、boot 時の通知量も負荷。
+- launcher に **`--supervise-self`** を追加（自分は PID1 のまま対象を exec、子プロセスが broker）。
+  これで **systemd が PID1 として起動でき、cEOS の boot は成功**（以前の「telinit が見つからない」
+  問題は PID1 でなかったため）。
+- broker 側にも preload と同じ option store/replay を追加。
+- しかし BGP 中継には未到達: broker が **単一スレッド**で cEOS 全プロセスの socket を扱うため、
+  どこかで通知処理が詰まるとプロセスツリー全体が停止し、node が応答不能（Cli も hang）になる。
+  また AF_INET と AF_INET6 の二重 listener で仮想 listener パスが競合する懸念もある。
 
-現状は **preload 経路（M6）が cEOS の成立経路**。broker 統一は追加作業（対象プロセスの
-boot 時 socket の把握、必要なら per-process/非同期化）が必要。
+現状は **preload 経路（M6）と混在構成（MIXED4）が成立**。broker 統一は
+broker の非阻塞化（per-process 多重化・非同期ハンドシェイク）と AF_INET6 方針の整理が残課題。
 
 ## 次の候補
 
-- seccomp broker 版での cEOS 適用の継続（boot 時 socket の対応）。
+- seccomp broker 版での cEOS 適用の継続（broker の非阻塞化、AF_INET6 方針）。
 - peak memory・収束時間の native/AnyREAL 比較。
-- 混在 4 ノード（GoBGP + cEOS）、より大きいトポロジ。
+- より大きいトポロジ。

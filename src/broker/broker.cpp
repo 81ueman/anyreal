@@ -249,12 +249,14 @@ class Broker {
                     break;
                 }
             }
-            int status = 0;
-            pid_t r = waitpid(target_pid_, &status, WNOHANG);
-            if (r == target_pid_) {
-                return WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+            if (target_pid_ > 0) {
+                int status = 0;
+                pid_t r = waitpid(target_pid_, &status, WNOHANG);
+                if (r == target_pid_) {
+                    return WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+                }
+                if (r < 0 && errno == ECHILD) return 0;
             }
-            if (r < 0 && errno == ECHILD) return 0;
         }
     }
 
@@ -335,6 +337,7 @@ class Broker {
         // event loop. epoll is level-triggered, so queued notifications re-fire.
         struct seccomp_notif req;
         if (notif_recv(listener_fd_, &req) < 0) {
+            if (errno == ENOENT || errno == EBADF) g_stop = 1; // target gone
             return;
         }
         struct seccomp_notif_resp resp;

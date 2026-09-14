@@ -165,6 +165,30 @@ scripts/experiments/run_m6_ceos.sh
   `LD_PRELOAD` でラップする。成功時は `M6_CEOS_PASS`。
 - `KEEP=1` を付けると失敗時にコンテナを残す（調査用）。
 
+## 11. cEOS の N ノード／混在トポロジ（M7）
+
+```bash
+scripts/experiments/run_ceos_topo.sh 4      # cEOS line N=2/3/4
+scripts/experiments/run_mixed4.sh           # GoBGP x2 + cEOS x2 (line, 1 controller)
+```
+
+- `run_ceos_topo.sh N`: cEOS の line トポロジ。session 確立・末端までの広告・撤回を検証。
+- `run_mixed4.sh`: GoBGP（`anyreal-run` broker 経由）と cEOS（preload 経由）を同一 controller で
+  相互接続。異実装 BGP の同居を検証。成功時は `MIXED4_PASS`。
+
+## 12. seccomp broker で cEOS（B: 試行）
+
+```bash
+# launcher/broker を cEOS 用にビルド（AlmaLinux 9）
+docker run --rm --platform linux/arm64 -v "$PWD":/work -w /work/src almalinux:9 \
+  bash -c 'dnf install -y gcc-c++ make && g++ -std=c++17 -O2 -g -o /work/build/anyreal-run-ala9 launcher/main.cpp broker/broker.cpp -lpthread'
+scripts/experiments/run_b_ceos.sh
+```
+
+`--supervise-self` で launcher が PID1 のまま `/sbin/init` を exec し、子が broker を担う。
+cEOS の boot は通るが、broker が単一スレッドのためプロセスツリーが詰まり、BGP 中継は未成立。
+
+
 
 
 

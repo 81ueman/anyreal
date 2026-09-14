@@ -44,10 +44,15 @@ printf '{"hosts":[{"id":0,"ip":"0.0.0.0","port":0}],"self_id":0}' > "${ROOT}/thi
 
 start_node() {
     local name="$1" id="$2" ip="$3" peers="$4"
-    local cmd="exec /usr/local/bin/anyreal-run --node ${id} --peers \"${peers}\" --real --ripc /ripc --mng /ripc/msg_manager_socket -- /sbin/init ${SETENV}"
     docker run -d --name "${name}" --privileged --network "${NET}" --ip "${ip}" \
         -v "${VOL}:/ripc" -v "${RUN}:/usr/local/bin/anyreal-run:ro" \
-        "${CEOS_ENV[@]}" "${IMG}" bash -c "${cmd}" >/dev/null
+        "${CEOS_ENV[@]}" "${IMG}" \
+        /usr/local/bin/anyreal-run --supervise-self --node "${id}" --peers "${peers}" \
+        --real --ripc /ripc --mng /ripc/msg_manager_socket -- \
+        /sbin/init systemd.setenv="CEOS=1" systemd.setenv="EOS_PLATFORM=ceoslab" \
+        systemd.setenv="container=docker" systemd.setenv="ETBA=1" \
+        systemd.setenv="SKIP_ZEROTOUCH_BARRIER_IN_SYSDBINIT=1" systemd.setenv="INTFTYPE=eth" \
+        systemd.setenv="MAPETH0=1" systemd.setenv="MGMT_INTF=eth0" >/dev/null
 }
 
 echo "-- starting cEOS under AnyREAL broker --"

@@ -52,7 +52,7 @@ PoC 1（GoBGP）の主要経路が成立。未改変 GoBGP 2 ノードを seccom
 | M4: 判定・計測 | 反復と broker 通知数まで（M4-lite）。資源比較は未実装 |
 | M5: cEOS 通常起動 | ARM64 cEOS 2 台で eBGP 確立・広告・撤回 確認。`Bgp` は libc リンク |
 | M6: cEOS AnyREAL | **完了**（`M6_CEOS_PASS`）。ARM64 cEOS 2 ノードが preload（UDS/fake-fd）のまま REAL controller 経由で eBGP 確立・経路広告・撤回 |
-| M7: cEOS 判定 | 未着手 |
+| M7: cEOS 判定 | 完了。cEOS line N=2/3/4、混在 4 ノード（GoBGP+cEOS）。seccomp broker での cEOS 統一は残課題 |
 
 再現手順と制約は [`docs/experiments.md`](docs/experiments.md)、
 [`docs/compatibility.md`](docs/compatibility.md) を参照。
