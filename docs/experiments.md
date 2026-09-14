@@ -153,6 +153,19 @@ printf 'NODE_ID=1\nPEER_LIST=10.30.0.2:10.30.0.3:2,\nBASE_TS=0\nRT_BASE_TS=0\nMO
 現状 `IMAGE_CEOS` で NETLINK 仮想化・`add_if`・`set_nht_ready` を無効化しても `Bgp` が
 preload 下で abort するため、M6 は原因切り分けが必要（`docs/compatibility.md` 参照）。
 
+## 10. cEOS × REAL controller（M6）
+
+```bash
+scripts/experiments/run_m6_ceos.sh
+```
+
+- cEOS の preload は `almalinux:9` で `make IMAGE_CEOS=1`（`third_party/REAL/preload/libpreload.so`）。
+- controller は `make R2I_DISABLED=1 TWO_PHASE_DISABLED=1`（`third_party/REAL/controller/controller`）。
+- 共有 `/ripc` ボリュームを controller と cEOS 双方にマウントし、`/usr/bin/Bgp` だけを
+  `LD_PRELOAD` でラップする。成功時は `M6_CEOS_PASS`。
+- `KEEP=1` を付けると失敗時にコンテナを残す（調査用）。
+
+
 
 
 

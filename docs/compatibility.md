@@ -166,35 +166,28 @@ cEOS では「対象プロセスには実 TCP ソケットを持たせ、`connec
 実 TCP へのフォールバックは不要になった。broker を cEOS へ適用する場合も同じ
 `store_opt`/`replay_opt` 相当を broker 側に持たせればよい。）
 
-### M6 統合の状況（あと一歩）
+### M6 統合: 成立（M6_CEOS_PASS）
 
-`scripts/experiments/run_m6_ceos.sh` を追加: 2 台の cEOS を preload 付きで起動し、
-controller を `ceos` トポロジ（`conf/ceos/topo2`）で起動、共有 `/ripc` 経由で BGP を
-確立する。`node_ops.cpp` に `ceos` の no-op アダプタを追加。
+`run_m6_ceos.sh` により、ARM64 cEOS 2 ノードが **preload（UDS/fake-fd）のまま REAL controller 経由**で
+eBGP を確立し、`192.168.1.0/24` の広告・撤回まで成功。
 
-確認できたこと:
-- cEOS の `Bgp` が preload 下で起動し、BGP connect 段で abort しない。
-- `/ripc/emu-real-<i>/listener:179`（listener）と `/ripc/emu-real-<i>/<peer>`（connector）が
-  両ノードに作成される。
-- ceos1 は BGP で `OpenSent` まで進む（controller へ OPEN を送信している）。
+最後の阻害要因は **epoll 対応の欠落**だった（PLAN.md §4.3 で予告済み）:
+- preload の `tcp_fdesc::read` は「poll/ppoll の slowpath で `nxt_msghdr` を peek 済み」でないと
+  `EAGAIN` を返す設計。cEOS/Arnet は **epoll** を使うため peek が走らず、accept 後も payload を
+  読めず（node2 が `Active` のまま）だった。
+- `IMAGE_CEOS` では `read`/`readv` 内で `PEEK_UNTIL` してから読むよう変更し解消。
+- 併せて受信 seq の不一致を assert からログへ緩和。
 
-未成立:
-- controller の `n_channel` が 0 のまま。connector の payload が対向 listener チャネルへ
-  中継されず、ceos2 は `Active`、ceos1 は `OpenSent` のまま留まる。
-- DEBUG ビルドの controller は `logPath/ctrl/` 未作成で落ちる等、ログ取得に難がある。
+結果: 両ノード `Estab`、controller 経由で経路広告・撤回が成立。**cEOS でも実 TCP へ
+フォールバックせず、REAL の効率思想（データプレーンを消し、UNIX/中継でスケール）を維持**。
 
-次の切り分け:
-- controller の `try_buildup` が node2 の listener へ connect できているか、payload が
-  replay manager から (2,1) チャネルへ送られているかを、DEBUG ログを安定化して確認する。
 
-追加の計測結果（非 DEBUG controller に一時ログ）:
-- `try_buildup i=2 j=1 path=.../emu-real-2/listener:179 connect=0` — node2 の listener への
-  接続は成功している。
-- `payload self=1 peer=2 len=81` — node1 の BGP OPEN を controller は受信している。
-- しかし以降 `payload self=2 ...` が出ず、`n_channel` は 0 のまま。すなわち
-  controller は OPEN を受けたが **対向 (2,1) チャネルへ中継していない**か、node2 へ届いて
-  いない。`node_replay_one_msg` は BGP_OPEN を常に replay する実装なので、チャネル状態
-  （`get(2,1)` の state）または配送（`sendmsg`→pollout）の成立を DEBUG ログで確認するのが次段。
+経緯（デバッグの要点）:
+- cEOS の `Bgp` が preload 下で起動 → BGP connect 段で abort しない。
+- controller は node1 の OPEN を受信し node2 の listener へ接続成功（`connect=0`）するが、
+  node2 は accept 後に payload を読めず `Active` のままだった。
+- 原因は epoll 対応の欠落（上記）。`read`/`readv` の peek 追加で解消し Established に到達。
+
 
 
 

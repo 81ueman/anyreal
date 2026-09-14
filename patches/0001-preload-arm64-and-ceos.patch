@@ -46,7 +46,7 @@ index 44e607a..7ae674d 100644
      fcntl_orig(fd, F_SETFD, flags | FD_CLOEXEC);
      fd2ptr_[fd] = nullptr;
 diff --git a/preload/preload.cpp b/preload/preload.cpp
-index 8fcf0b4..fc7d315 100644
+index 8fcf0b4..b0f5b1a 100644
 --- a/preload/preload.cpp
 +++ b/preload/preload.cpp
 @@ -99,7 +99,7 @@ void initialize_port() {
@@ -130,27 +130,13 @@ index 8fcf0b4..fc7d315 100644
          auto fdesc_ptr = std::make_unique<fdesc>(ret);
          int ufd = glb_fdset.emplace(std::move(fdesc_ptr));
          return ufd;
-@@ -1826,6 +1844,11 @@ PRELOAD5(getsockopt, int, int, sockfd, int, level, int, optname,
-     std::string optname_str = psockopt_optname(level, optname, optval);
-     LOG("Entering getsockopt(%d, %s)\n",
-         sockfd, level_str.c_str());
-+#ifdef IMAGE_CEOS
-+    fprintf(stderr, "[anyreal] GETSOCKOPT fd=%d level=%d optname=%d optlen=%u managed=%d\n",
-+            sockfd, level, optname, optlen ? (unsigned)*optlen : 0u,
-+            (int)glb_fdset.contains(sockfd));
-+#endif
- 
- #ifdef LOG_ONLY
+@@ -1332,8 +1350,7 @@ PRELOAD4(accept4, int, int, sockfd, struct sockaddr *, addr,
  {
-@@ -1853,6 +1876,11 @@ PRELOAD5(setsockopt, int, int, sockfd, int, level, int, optname,
-     std::string optname_str = psockopt_optname(level, optname, optval);
-     LOG("Entering setsockopt(sockfd=%d, level=%s)\n",
-             sockfd, level_str.c_str());
-+#ifdef IMAGE_CEOS
-+    fprintf(stderr, "[anyreal] SETSOCKOPT fd=%d level=%d optname=%d optlen=%u managed=%d\n",
-+            sockfd, level, optname, (unsigned)optlen,
-+            (int)glb_fdset.contains(sockfd));
-+#endif
+     PRELOAD_ORIG(accept4)
+     PRELOAD_ORIG(getsockname)
+-    LOG("Entering accept4(fd=%d)\n", sockfd);
+-    std::string addr_str = paddr(addr, *addrlen);
++    LOG("Entering accept4(fd=%d)\n", sockfd);    std::string addr_str = paddr(addr, *addrlen);
  
  #ifdef LOG_ONLY
  {
@@ -176,7 +162,7 @@ index fa77f93..f612f05 100644
  
  struct peer {
 diff --git a/preload/tcp.cpp b/preload/tcp.cpp
-index 869c0f1..cec555e 100644
+index 869c0f1..827204f 100644
 --- a/preload/tcp.cpp
 +++ b/preload/tcp.cpp
 @@ -5,6 +5,25 @@
@@ -219,7 +205,57 @@ index 869c0f1..cec555e 100644
  }
  
  ssize_t tcp_fdesc::writev(const struct iovec *iov, int iovcnt)
-@@ -618,45 +640,76 @@ ssize_t
+@@ -205,7 +227,9 @@ ssize_t tcp_fdesc::read_internal(char *buf, int buflen)
+     rcv_offset += n_copy;
+ 
+ #ifndef IMAGE_CRPD
++#ifndef IMAGE_CEOS
+     assert(nxt_seq == rcv_hdr.hdr.seq);
++#endif
+ #endif
+     nxt_msghdr_seen = false;
+ 
+@@ -240,11 +264,20 @@ ssize_t tcp_fdesc::read(void *buf, size_t count)
+     }
+ 
+ #ifndef IMAGE_CRPD
++#ifdef IMAGE_CEOS
++    if (!nxt_msghdr_seen) {
++        // cEOS/Arnet waits with epoll, which this preload does not intercept,
++        // so the poll fast/slow path never runs. Peek here and allow read().
++        PEEK_UNTIL(this->fd, &this->nxt_msghdr, pldhdrsiz);
++        nxt_msghdr_seen = true;
++    }
++#else
+     if (!nxt_msghdr_seen) {
+         // second read, not allowed by ppoll() yet
+         errno = EAGAIN;
+         return -1;
+     }
++#endif
+ #endif
+ 
+     ret = read_internal((char *)buf, count);
+@@ -273,11 +306,18 @@ ssize_t tcp_fdesc::readv(const struct iovec *iov, int iovcnt)
+     }
+ 
+ #ifndef IMAGE_CRPD
++#ifdef IMAGE_CEOS
++    if (!nxt_msghdr_seen) {
++        PEEK_UNTIL(this->fd, &this->nxt_msghdr, pldhdrsiz);
++        nxt_msghdr_seen = true;
++    }
++#else
+     if (!nxt_msghdr_seen) {
+         // second read, not allowed by ppoll() yet
+         errno = EAGAIN;
+         return -1;
+     }
++#endif
+ #endif
+ 
+     ret = read_internal((char *)iov[0].iov_base, iov[0].iov_len);
+@@ -618,45 +658,76 @@ ssize_t
  tcp_fdesc::sendmsg(const struct msghdr * msg, int flags)
  {
      PRELOAD_ORIG(sendmsg);
@@ -311,7 +347,7 @@ index 869c0f1..cec555e 100644
  }
  
  int tcp_fdesc::bind(const struct sockaddr * addr, socklen_t addrlen)
-@@ -767,7 +820,13 @@ tcp_fdesc::getsockopt_tcp_socket_impl(
+@@ -767,7 +838,13 @@ tcp_fdesc::getsockopt_tcp_socket_impl(
      default:
          fprintf(stderr, "optname=%d\n", optname);
          LOG("optname=%d\n", optname);
@@ -325,7 +361,7 @@ index 869c0f1..cec555e 100644
          break;
      }
      return 0;
-@@ -790,7 +849,13 @@ tcp_fdesc::getsockopt_tcp_ip_impl(
+@@ -790,7 +867,13 @@ tcp_fdesc::getsockopt_tcp_ip_impl(
          break;
      default:
          fprintf(stderr, "optname=%d\n", optname);
@@ -339,7 +375,7 @@ index 869c0f1..cec555e 100644
          break;
      }
      return 0;
-@@ -818,7 +883,13 @@ tcp_fdesc::getsockopt_tcp_tcp_impl(
+@@ -818,7 +901,13 @@ tcp_fdesc::getsockopt_tcp_tcp_impl(
          break;
      default:
          fprintf(stderr, "optname=%d\n", optname);
@@ -353,7 +389,7 @@ index 869c0f1..cec555e 100644
          break;
      }
      return 0;
-@@ -907,7 +978,11 @@ tcp_fdesc::setsockopt_tcp_ip_impl(
+@@ -907,7 +996,11 @@ tcp_fdesc::setsockopt_tcp_ip_impl(
          break;
      default:
          fprintf(stderr, "optname=%d\n", optname);
@@ -365,7 +401,7 @@ index 869c0f1..cec555e 100644
          break;
      }
      return 0;
-@@ -931,7 +1006,11 @@ tcp_fdesc::setsockopt_tcp_tcp_impl(
+@@ -931,7 +1024,11 @@ tcp_fdesc::setsockopt_tcp_tcp_impl(
          break;
      default:
          fprintf(stderr, "optname=%d\n", optname);
@@ -377,7 +413,7 @@ index 869c0f1..cec555e 100644
          break;
      }
      return 0;
-@@ -944,6 +1023,7 @@ tcp_fdesc::setsockopt(
+@@ -944,6 +1041,7 @@ tcp_fdesc::setsockopt(
  )
  {
      LOG("at TCP setsockopt(), fd=%d\n", this->fd);
