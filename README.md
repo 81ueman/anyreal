@@ -44,7 +44,7 @@ PoC 1（GoBGP）の主要経路が成立。未改変 GoBGP 2 ノードを seccom
 
 | 段階 | 状態 |
 | --- | --- |
-| M0: ARM64 ビルド | preload/controller/lwc が aarch64 でビルド。FRR 再現は未実施 |
+| M0: ARM64 ビルド | preload/controller/lwc が aarch64 でビルド。`real-frr` ARM64 イメージ + lwc create/start/exec を確認。上流 baseline/preload テストは perf 前提のため未実行 |
 | M1: native GoBGP | 2 ノード Established・広告・撤回 確認 |
 | M2: 最小 syscall PoC | Go echo 100 逐次 + 16 並行 成功 |
 | M2b: GoBGP + broker | 2 ノード Established・広告・撤回 成功（M2 relay） |

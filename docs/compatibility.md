@@ -72,7 +72,9 @@ native の read/write を使う設計であり捕捉対象に含めない。
 | 項目 | 値 | 状態 |
 | --- | --- | --- |
 | 上流基準版 | FRR 10.1.4（`docker/frr`） | 上流記載 |
-| ARM64 イメージ | 未ビルド | TODO（M0） |
+| ARM64 イメージ | `real-frr:latest`（`docker build --platform linux/arm64`, 1.99GB, image id `a2ef7b2dd6bc`） | 確認済み |
+| lwc コンテナ | `lwc create real-frr` → `lwc start`（tini）→ `lwc exec` 成功。`/usr/lib/frr/bgpd` 等を確認 | 確認済み |
+| 上流 baseline/preload テスト | 未実行。上流 run.sh は `perf` 前提で、OrbStack kernel では perf が使えないため | 未検証 |
 
 ## cEOS-lab
 

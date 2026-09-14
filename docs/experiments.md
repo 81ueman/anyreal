@@ -42,6 +42,20 @@ docker build --platform linux/arm64 -t real-frr .
 `ports.ubuntu.com` が使われるため既定ミラーのままビルドされる。
 `real-frr` 取得後、`scripts/utils/lwc_load_img.sh` 相当で `/opt/lwc/image` へ展開する。
 
+```bash
+mkdir -p /opt/lwc/{image,containers,volumes,layers}
+docker image save real-frr -o /tmp/real-frr.tar
+tar -xpf /tmp/real-frr.tar -C /opt/lwc/image/real-frr
+./lwc/target/release/lwc create real-frr test-frr
+./lwc/target/release/lwc start test-frr tini -- sleep infinity
+./lwc/target/release/lwc exec test-frr ls /usr/lib/frr
+```
+
+注意: 上流 `run.sh` / `run_one.sh` は `perf record`/`perf stat` を前提とする。
+OrbStack kernel（`7.0.11-orbstack`）では perf が使えないため、上流テスト全体の
+再実行は別の Linux ホストで行う。ARM64 イメージと lwc 経路はここまでで確認済み。
+
+
 
 ## 3. GoBGP の native 2 ノード（M1）
 
