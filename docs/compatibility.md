@@ -106,13 +106,26 @@ M6 ではどちらを使うか（併用含む）を、実 socket の捕捉結果
 | preload のビルド | cEOS は AlmaLinux 9.7 / glibc 2.34 のため、同系列の `almalinux:9` で `make IMAGE_CEOS=1` してビルド | 確認済み |
 | 注入方法 | 全体の `/etc/ld.so.preload` は cEOS を壊す。`/usr/bin/Bgp` を wrapper にして `LD_PRELOAD` を設定する方式が有効 | 確認済み |
 | hijack 対象 | `IMAGE_CEOS` で `__progname == "Bgp"` に限定。NETLINK は native 維持 | 実装済み |
-| `Bgp` 起動 | wrapper + preload で `Bgp` は `add_if`/`set_nht_ready` を回避すると起動が進むが、その後 NOS 内部で abort | 未達（要対応） |
+| `Bgp` 起動 | wrapper + preload で `Bgp` は起動が進む（`add_if`/`set_nht_ready` 回避）。ただし BGP socket を扱う段で crash | 未達（原因判明） |
 
-M6a の残作業:
-- `Bgp` が preload 下で abort する原因の特定（preload が fd/挙動を変えることによる
-  NOS 内部 assert の可能性）。REAL 固有の順序制御（`set_nht_ready`）や NETLINK 仮想化を
-  外した状態で、どの前提が崩れているかを切り分ける。
-- cEOS の BGP socket だけを対象にするための最小 hijack（port 179 / peer アドレス限定）の検討。
+M6a/M6b の症状と原因:
+- `Bgp` は preload 下で起動し、`add_if`/`set_nht_ready`（REAL 固有の NETLINK・順序制御）を
+  回避すれば socket 段まで進む。
+- preload 側の `socket()` 失敗時に `fd=-1` を `fdesc_set` に入れて abort する問題は修正
+  （`ret<0` をそのまま返す）。
+- preload の `setsockopt`/`getsockopt` 未対応オプションでの `assert(0)` は `IMAGE_CEOS`
+  では無視するよう修正（cEOS は未対応 TCP オプションを渡す）。
+- その後 **cEOS 自身の `Arnet::setSocketOptionInteger`（`TcpClientServer.tin:147`）が
+  assert して abort** する。cEOS の `Bgp` は独自 TCP オプション（観測: `optname=932717413`）を
+  前提にソケットを検証しており、preload の fake-fd/socket エミュレーションと噛み合わない。
+
+M6 の結論（方針）:
+- 上流 preload は FRR のふるまいに密結合しており、cEOS の `Bgp` にはそのまま適用できない
+  （PLAN.md §4.3 の「対象プロセス内の状態や libc 呼び出しとの結合を外す必要」を裏付け）。
+- 次は seccomp broker を多プロセス対応にして cEOS を統一する（PID1 に filter、broker が
+  `seccomp_notif.pid` ごとに fd table・メモリ操作）。REAL controller のプロトコルは流用する。
+
+
 
 
 

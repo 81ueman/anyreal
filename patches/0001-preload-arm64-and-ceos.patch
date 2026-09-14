@@ -46,7 +46,7 @@ index 44e607a..7ae674d 100644
      fcntl_orig(fd, F_SETFD, flags | FD_CLOEXEC);
      fd2ptr_[fd] = nullptr;
 diff --git a/preload/preload.cpp b/preload/preload.cpp
-index 8fcf0b4..0e29420 100644
+index 8fcf0b4..3d767e3 100644
 --- a/preload/preload.cpp
 +++ b/preload/preload.cpp
 @@ -99,7 +99,7 @@ void initialize_port() {
@@ -118,6 +118,18 @@ index 8fcf0b4..0e29420 100644
  #else
          true
  #endif
+@@ -1176,6 +1189,11 @@ socket_impl(int domain, int type, int protocol)
+     //     return socket_inet_impl(domain, type, protocol);
+     } else {
+         int ret = socket_orig(domain, type, protocol);
++        if (ret < 0) {
++            // A failed socket() must not be registered (fd=-1 would corrupt
++            // fdesc_set). cEOS exercises error paths that FRR did not.
++            return ret;
++        }
+         auto fdesc_ptr = std::make_unique<fdesc>(ret);
+         int ufd = glb_fdset.emplace(std::move(fdesc_ptr));
+         return ufd;
 diff --git a/preload/preload.h b/preload/preload.h
 index fa77f93..f612f05 100644
 --- a/preload/preload.h
@@ -139,3 +151,70 @@ index fa77f93..f612f05 100644
  #define SPEEDUP_RATIO 1
  
  struct peer {
+diff --git a/preload/tcp.cpp b/preload/tcp.cpp
+index 869c0f1..9660056 100644
+--- a/preload/tcp.cpp
++++ b/preload/tcp.cpp
+@@ -767,7 +767,12 @@ tcp_fdesc::getsockopt_tcp_socket_impl(
+     default:
+         fprintf(stderr, "optname=%d\n", optname);
+         LOG("optname=%d\n", optname);
++#ifdef IMAGE_CEOS
++        *optlen = 0;
++        return 0;
++#else
+         assert(0);
++#endif
+         break;
+     }
+     return 0;
+@@ -790,7 +795,12 @@ tcp_fdesc::getsockopt_tcp_ip_impl(
+         break;
+     default:
+         fprintf(stderr, "optname=%d\n", optname);
++#ifdef IMAGE_CEOS
++        *optlen = 0;
++        return 0;
++#else
+         assert(0);
++#endif
+         break;
+     }
+     return 0;
+@@ -818,7 +828,12 @@ tcp_fdesc::getsockopt_tcp_tcp_impl(
+         break;
+     default:
+         fprintf(stderr, "optname=%d\n", optname);
++#ifdef IMAGE_CEOS
++        *optlen = 0;
++        return 0;
++#else
+         assert(0);
++#endif
+         break;
+     }
+     return 0;
+@@ -907,7 +922,11 @@ tcp_fdesc::setsockopt_tcp_ip_impl(
+         break;
+     default:
+         fprintf(stderr, "optname=%d\n", optname);
++#ifdef IMAGE_CEOS
++        return 0;
++#else
+         assert(0);
++#endif
+         break;
+     }
+     return 0;
+@@ -931,7 +950,11 @@ tcp_fdesc::setsockopt_tcp_tcp_impl(
+         break;
+     default:
+         fprintf(stderr, "optname=%d\n", optname);
++#ifdef IMAGE_CEOS
++        return 0;
++#else
+         assert(0);
++#endif
+         break;
+     }
+     return 0;
