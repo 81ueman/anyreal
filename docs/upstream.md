@@ -1,0 +1,71 @@
+# 上流 REAL との関係
+
+## 参照
+
+- リポジトリ: https://github.com/ants-xjtu/REAL-artifact-evaluation
+- 参照 commit: `52f440cfb597fe9440ed3e862f98bd5bbf9171c4`（`nsdi26-ae` ブランチの調査時点）
+- 取得: `scripts/fetch_upstream.sh` が `third_party/REAL/` へ固定チェックアウトする
+  （`.gitignore` 済み。リポジトリには取り込まない）
+
+`docs/upstream.md` は由来と差分を記録する文書であり、上流の権利表示は保持する。
+現時点で本リポジトリは上流の fork ではなく、方式検証用の独立実装を含む。
+
+## 上流の構造（制御プレーン経路）
+
+```
+                   upstream controller (C++)
+/opt/lwc/volumes/ripc/msg_manager_socket  <-- UNIX socket
+        ^                              ^
+        | real_syn / real_pld          | real_syn / real_pld
+   [ libpreload.so ]              [ libpreload.so ]
+        ^ LD_PRELOAD                   ^ LD_PRELOAD
+      bgpd (libc)                   bgpd (libc)
+```
+
+- `preload/`: `LD_PRELOAD` 用ライブラリ。libc の `socket`/`connect`/`bind`/`listen`/
+  `accept4`/`read`/`write`/`ppoll` などをラップし、プロトコル `real_hdr_t` を実装する。
+- `controller/`: 中継と収束制御。`MNG_SOCKET_PATH`（`/opt/lwc/volumes/ripc/msg_manager_socket`）
+  で接続を受け、`real_syn_t` の `cli_id`/`svr_id` から channel を作る。
+- `lwc/`: Rust 製のコンテナ実行。overlayfs で rootfs を組み、`unshare(CLONE_NEWPID|NEWNET|NEWUTS)`
+  して `pivot_root`、`lwc exec` で対象を namespace へ入れる。
+
+### プロトコル（`controller/const.hpp` / `preload/preload.h`）
+
+```c
+typedef struct { int32_t msg_type; int32_t msg_len; int64_t seq; } real_hdr_t;
+typedef struct { real_hdr_t hdr; int32_t cli_id; int32_t svr_id; uint16_t cli_port; } real_syn_t;
+typedef struct { real_hdr_t hdr; uint16_t cli_port; } real_synack_t;
+typedef struct { real_hdr_t hdr; int32_t src_id; int32_t dst_id; } real_pld_t;
+// msg_type: REAL_SYN=1, REAL_SYNACK=2, REAL_PAYLOAD=3, ...
+```
+
+### 接続確立の流れ（BGP, port 179）
+
+1. 接続側: fd を `/ripc/emu-real-<self_id>/<peer_id>` に bind し、controller の
+   `msg_manager_socket` へ `connect`。`REAL_SYN{cli_id,svr_id}` を送る。
+2. controller: channel を作り、割り当てた `cli_port` を `REAL_SYNACK` で返す。
+3. 待受側: fd を `/ripc/emu-real-<self_id>/listener:179` に bind して `listen`。
+   controller がその path へ `connect` してきて、`accept4` した fd 上で `real_syn_t` を読む。
+4. 以降は `REAL_PAYLOAD{src_id,dst_id}` を controller 経由で双方向に中継。`seq` は controller が付与。
+
+## AnyREAL 側の差分（方針）
+
+| 部分 | 上流 | AnyREAL |
+| --- | --- | --- |
+| 捕捉入口 | libc wrapper | seccomp user notification + broker |
+| 対象 runtime | libc 利用 NOS | libc 非依存 runtime（GoBGP）を含む |
+| 仮想 socket 実体 | プロセス内 fdesc + controller 接続 fd | broker 保持の socketpair + controller 接続 fd |
+| controller | そのまま | そのまま利用（通常実行モードを追加） |
+| lwc | そのまま | Launcher として利用 |
+
+## 上流への ARM64 移植差分
+
+`patches/` に置く。判明している項目:
+
+| ファイル | 差分 | 理由 |
+| --- | --- | --- |
+| `preload/Makefile` | `-mcx16` を ARM64 では付けない | x86_64 専用オプション |
+| （追加調査中） | | |
+
+上流は Ubuntu 24.04 / x86_64 前提のため、ARM64 ビルド・同期処理・上流テストの
+再現結果をここへ追記する。

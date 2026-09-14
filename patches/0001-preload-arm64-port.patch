@@ -1,0 +1,79 @@
+diff --git a/preload/Makefile b/preload/Makefile
+index fb3ff5b..3003e60 100644
+--- a/preload/Makefile
++++ b/preload/Makefile
+@@ -2,6 +2,9 @@ all: libpreload.so
+ 
+ cppflags=-g -O2 -std=c++17 -fPIC -fvisibility=hidden -shared -fno-omit-frame-pointer
+ 
++# -mcx16 is x86_64-only (cmpxchg16b); omit it on other architectures.
++ARCHFLAGS := $(if $(filter x86_64,$(shell uname -m)),-mcx16,)
++
+ ifeq ($(LOGONLY), 1)
+ 	cppflags += -DLOG_ONLY
+ endif
+@@ -36,7 +39,7 @@ HDR_FILES = debug.h\
+ 	util.h
+ 
+ libpreload.so: ${SRC_FILES} ${HDR_FILES} Makefile
+-	g++ ${cppflags} ${SRC_FILES} -fpermissive -mcx16 -pthread -lrt -ldl -o libpreload.so
++	g++ ${cppflags} ${SRC_FILES} -fpermissive ${ARCHFLAGS} -pthread -lrt -ldl -o libpreload.so
+ 
+ clean:
+ 	rm -f *.so
+diff --git a/preload/fdesc.cpp b/preload/fdesc.cpp
+index 44e607a..7ae674d 100644
+--- a/preload/fdesc.cpp
++++ b/preload/fdesc.cpp
+@@ -25,7 +25,7 @@ int fdesc_set::close(int fd)
+         null_fd = open_orig("/dev/null", O_RDONLY | O_CLOEXEC);
+         assert(null_fd > 0);
+     }
+-    syscall(SYS_dup2, null_fd, fd);
++    REAL_SYSCALL_DUP2(null_fd, fd);
+     int flags = fcntl_orig(fd, F_GETFD);
+     fcntl_orig(fd, F_SETFD, flags | FD_CLOEXEC);
+     fd2ptr_[fd] = nullptr;
+diff --git a/preload/preload.cpp b/preload/preload.cpp
+index 8fcf0b4..07c7f43 100644
+--- a/preload/preload.cpp
++++ b/preload/preload.cpp
+@@ -99,7 +99,7 @@ void initialize_port() {
+ char *real_getenv(const char *name)
+ {
+     // Open the "/real_env" file
+-    int fd = syscall(SYS_open, "/real_env", O_RDONLY);
++    int fd = REAL_SYSCALL_OPEN("/real_env", O_RDONLY);
+     if (fd == -1) {
+         return NULL;
+     }
+@@ -447,7 +447,7 @@ char *get_cmdline() {
+     char path[256];
+     snprintf(path, sizeof(path), "/proc/self/cmdline");
+ 
+-    int fd = syscall(SYS_open, path, O_RDONLY);
++    int fd = REAL_SYSCALL_OPEN(path, O_RDONLY);
+     if (fd == -1) {
+         return NULL;
+     }
+diff --git a/preload/preload.h b/preload/preload.h
+index fa77f93..f612f05 100644
+--- a/preload/preload.h
++++ b/preload/preload.h
+@@ -49,6 +49,16 @@ extern "C" {
+ 
+ }
+ 
++// Architecture compatibility helpers.
++// aarch64 does not provide the open()/dup2() syscalls; use openat()/dup3().
++#if defined(__aarch64__)
++#  define REAL_SYSCALL_OPEN(path, flags) syscall(SYS_openat, AT_FDCWD, (path), (flags))
++#  define REAL_SYSCALL_DUP2(oldfd, newfd) syscall(SYS_dup3, (oldfd), (newfd), 0)
++#else
++#  define REAL_SYSCALL_OPEN(path, flags) syscall(SYS_open, (path), (flags))
++#  define REAL_SYSCALL_DUP2(oldfd, newfd) syscall(SYS_dup2, (oldfd), (newfd))
++#endif
++
+ #define SPEEDUP_RATIO 1
+ 
+ struct peer {

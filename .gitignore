@@ -1,0 +1,20 @@
+# Build outputs
+build/
+*.o
+*.so
+
+# Local scratch / generated artifacts
+.scratch/
+results/
+pics/
+conf/
+hosts.json
+cleanup.log
+.venv/
+
+# Pinned upstream checkout (fetched by scripts/fetch_upstream.sh)
+third_party/REAL/
+third_party/gobgp/
+
+# Tooling
+.DS_Store
