@@ -120,6 +120,18 @@ ARM64 cEOS 2 台を containerlab 相当設定で起動し、Docker bridge 上で
 - `router bgp` の前に `ip routing` が必要。
 - CLI は `/usr/bin/Cli`（= FastCli）。EOS の出力は `Estab` と省略される。
 
+### libc socket を使うかの確認（LD_PRELOAD プローブ）
+
+```bash
+# 開発コンテナ内
+gcc -shared -fPIC -O2 -o build/libprobe.so src/probe/probe.c -ldl
+```
+
+これを cEOS コンテナへコピーし `/etc/ld.so.preload` に登録して再起動すると、
+`/tmp/anyreal-probe.log` に libc wrapper 経由の `socket`/`connect`/`accept4` が出る。
+cEOS `Bgp` では `connect(fd, <peer>:179)` が記録され、libc 経由であることを確認済み。
+
+
 
 
 

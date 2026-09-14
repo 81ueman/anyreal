@@ -89,8 +89,16 @@ native の read/write を使う設計であり捕捉対象に含めない。
 | BGP 起動 | `ip routing` を有効化してから `router bgp <as>`。ProcMgr/Launcher が `Bgp` を起動 | 確認済み |
 | 2 ノード session | Docker bridge 上で eBGP Established、`192.168.1.0/24` の広告・撤回 | 確認済み（M5） |
 | `Bgp` の実体 | 動的リンク aarch64 ELF。`libc.so.6`, `libstdc++`, `libAgentBase.so`, `libMarco.so` に依存 | 確認済み |
+| socket 捕捉 | `LD_PRELOAD` プローブ（`src/probe/probe.c`）で **`connect(fd, <peer>:179)` が libc wrapper 経由**であることを確認 | 確認済み |
 | プロセス/IPC | PID1 systemd、`ProcMgr`、`Sysdb`(Python)、`ConfigAgent`、`Launcher`、各種 agent。UNIX socket/共有メモリで連携 | 確認済み（概要） |
 | 多数プロセスへの filter 継承 | PID1 に filter を入れ子孫へ継承させる方針。broker 側で `n->pid` を使う対応が必要 | 未検証 |
+
+M5 の結論: cEOS の `Bgp` は libc socket を使うため、**元 REAL の `LD_PRELOAD` 方式が
+そのまま適用できる**（GoBGP とは対照的）。AnyREAL の seccomp broker でも扱えるが、
+cEOS は多プロセスなので PID1 へ filter を入れて子孫へ継承させる構成と、broker が
+通知元プロセス（`seccomp_notif.pid`）ごとに fd table・メモリ操作を行う対応が必要。
+M6 ではどちらを使うか（併用含む）を、実 socket の捕捉結果で決める。
+
 
 `Bgp` が libc リンクであることは、元 REAL の `LD_PRELOAD` 方式が cEOS の BGP にも
 適用できる可能性を示す。AnyREAL の seccomp broker でも同じ境界を扱える。M6 では
