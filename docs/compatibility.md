@@ -38,7 +38,21 @@ P-1 の計測: OrbStack/Rosetta 上の amd64 `gcc:14` で `seccomp(SECCOMP_SET_M
 | M2（Go 小プログラム） | 100 逐次 + 16 並行の echo 接続が成功。close・FD 再利用を含む | 確認済み |
 | M2b（GoBGP を broker で実行） | 未改変 GoBGP v4.9.0 の 2 ノードで session Established、prefix 広告・撤回が成功（M2 relay 経由） | 確認済み |
 | M3（REAL controller 接続） | 未改変 GoBGP 2 ノードを **上流 controller 経由**で接続。session Established、`192.168.1.0/24` の広告・撤回が成功。controller の `n_channel: 2` と一致。3/3 回成功 | 確認済み |
+| M4-lite（反復と計測） | M3 シナリオ 3/3 成功。broker 通知数は node1 約 240 / node2 約 122（gRPC 操作の差）、bytes も再現的 | 確認済み |
 | 再接続（peer 再起動） | controller は STAGE 遷移時のみ node を再起動。CONVERGE 中の再接続は未対応 | 未検証 |
+
+### GoBGP の network syscall（strace, `-e trace=%network`）
+
+| syscall | broker の扱い |
+| --- | --- |
+| `socket` / `connect` / `bind` / `listen` / `accept4` | 仮想化（捕捉） |
+| `getsockname` / `getsockopt` / `setsockopt` | 仮想化（AF_INET 情報を返す） |
+| `read` / `write` / `sendto` / `recvfrom` | native 維持（socketpair 経由。捕捉不要） |
+| `futex` / timer / NETLINK | native 維持 |
+
+短期 trace のため Establish 後の `read`/`write` は出ていないが、Go は socketpair 上で
+native の read/write を使う設計であり捕捉対象に含めない。
+
 
 ## 既知の制約（PoC 1 時点）
 

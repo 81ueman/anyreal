@@ -72,6 +72,17 @@ scripts/experiments/run_m3.sh
 - 観測窓は `CONVERGE_SEC`（既定 30 秒, controller の `ANYREAL_CONVERGE_SEC`）。
 - controller は `R2I_DISABLED=1 TWO_PHASE_DISABLED=1` でビルドする（通常実行モード）。
 
+## 7. 反復と計測（M4-lite）
+
+```bash
+N=5 scripts/experiments/run_m4.sh
+```
+
+M3 シナリオを N 回実行し、成功数と broker の syscall 通知数・転送バイト数を集計する
+（`ANYREAL_STATS=1` で broker が終了時に `[anyreal-stats]` を stderr へ出力）。
+性能の native 比較（CPU・peak memory・収束時間）は未実装。
+
+
 
 ## 実験 ID に含めるもの
 

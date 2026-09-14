@@ -9,6 +9,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export ANYREAL_ROOT="${ROOT}"
 export ANYREAL_CONVERGE_SEC="${CONVERGE_SEC:-30}"
+# Make brokers dump syscall counters on exit (captured in anyreal-node*.log).
+export ANYREAL_STATS=1
 GOBGP="${GOBGP:-${ROOT}/build/gobgp}"
 RIPC="/opt/lwc/volumes/ripc"
 WAIT="${WAIT:-60}"
@@ -77,5 +79,13 @@ sleep 1
 if grep -q '192.168.1.0/24' "${LOGDIR}/node2.rib.after.txt"; then
     echo "FAILED: prefix not withdrawn"
     exit 1
+fi
+
+if [ "${STATS:-0}" = "1" ]; then
+    # Ask the brokers to dump their syscall counters, then exit.
+    pkill -TERM -x anyreal-run 2>/dev/null || true
+    sleep 1
+    echo "--- broker stats ---"
+    grep -h anyreal-stats "${LOGDIR}"/anyreal-node*.log 2>/dev/null || true
 fi
 echo "M3_PASS (logs in ${LOGDIR})"

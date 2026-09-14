@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <signal.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -26,6 +27,10 @@
 namespace anyreal {
 namespace {
 
+volatile sig_atomic_t g_stop = 0;
+
+void on_stop_signal(int) { g_stop = 1; }
+
 constexpr int kMaxFrame = 1 << 16;
 
 void set_nonblock(int fd, bool on) {
@@ -38,6 +43,7 @@ int write_all(int fd, const void *buf, size_t n) {
     const char *p = static_cast<const char *>(buf);
     size_t off = 0;
     while (off < n) {
+        if (g_stop) return -1;
         ssize_t r = write(fd, p + off, n - off);
         if (r < 0) {
             if (errno == EINTR) continue;
@@ -52,6 +58,7 @@ int read_all(int fd, void *buf, size_t n) {
     char *p = static_cast<char *>(buf);
     size_t off = 0;
     while (off < n) {
+        if (g_stop) return -1;
         ssize_t r = read(fd, p + off, n - off);
         if (r < 0) {
             if (errno == EINTR) continue;
@@ -135,6 +142,17 @@ class Broker {
     }
 
     int run() {
+        struct sigaction sa;
+        memset(&sa, 0, sizeof(sa));
+        sa.sa_handler = on_stop_signal;
+        sigaction(SIGTERM, &sa, nullptr);
+        sigaction(SIGINT, &sa, nullptr);
+        int rc = run_loop();
+        if (getenv("ANYREAL_STATS")) dump_stats();
+        return rc;
+    }
+
+    int run_loop() {
         struct epoll_event ev;
         memset(&ev, 0, sizeof(ev));
         ev.events = EPOLLIN;
@@ -143,6 +161,7 @@ class Broker {
         set_nonblock(listener_fd_, true);
 
         for (;;) {
+            if (g_stop) return 0;
             struct epoll_event events[64];
             int n = epoll_wait(epfd_, events, 64, 100);
             if (n < 0) {
@@ -279,6 +298,8 @@ class Broker {
     }
 
     bool handle(struct seccomp_notif *n, struct seccomp_notif_resp *resp) {
+        notif_total_++;
+        syscall_counts_[n->data.nr]++;
         if (getenv("ANYREAL_DEBUG"))
             fprintf(stderr, "[broker] syscall %lld a0=%lld a1=%lld a2=%lld\n",
                     (long long)n->data.nr, (long long)n->data.args[0],
@@ -934,6 +955,7 @@ class Broker {
         char buf[kMaxFrame];
         ssize_t r = read(vs->broker_end, buf, sizeof(buf));
         if (r <= 0) return;
+        bytes_to_backhaul_ += r;
         if (vs->backhaul_fd < 0) return;
         if (cfg_.use_real && vs->is_bgp) {
             real_pld_t pld;
@@ -994,6 +1016,7 @@ class Broker {
                 return;
             }
             if (read_all(vs->backhaul_fd, buf, (size_t)len) < 0) return;
+            bytes_to_app_ += len;
             write_all(vs->broker_end, buf, (size_t)len);
             return;
         }
@@ -1003,6 +1026,7 @@ class Broker {
             shutdown(vs->broker_end, SHUT_WR);
             return;
         }
+        bytes_to_app_ += r;
         write_all(vs->broker_end, buf, (size_t)r);
     }
 
@@ -1062,6 +1086,21 @@ class Broker {
         if (getenv("ANYREAL_DEBUG"))
             fprintf(stderr, "[broker] signal_accept write=%zd errno=%d\n", r, errno);
     }
+
+    void dump_stats() {
+        fprintf(stderr,
+                "[anyreal-stats] self_id=%d notifications=%ld bytes_to_backhaul=%ld "
+                "bytes_to_app=%ld\n",
+                cfg_.self_id, notif_total_, bytes_to_backhaul_, bytes_to_app_);
+        for (const auto &kv : syscall_counts_) {
+            fprintf(stderr, "[anyreal-stats]   syscall %ld: %d\n", kv.first, kv.second);
+        }
+    }
+
+    long notif_total_ = 0;
+    long bytes_to_backhaul_ = 0;
+    long bytes_to_app_ = 0;
+    std::unordered_map<long, int> syscall_counts_;
 
     int listener_fd_;
     pid_t target_pid_;
