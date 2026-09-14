@@ -187,6 +187,16 @@ controller を `ceos` トポロジ（`conf/ceos/topo2`）で起動、共有 `/ri
 - controller の `try_buildup` が node2 の listener へ connect できているか、payload が
   replay manager から (2,1) チャネルへ送られているかを、DEBUG ログを安定化して確認する。
 
+追加の計測結果（非 DEBUG controller に一時ログ）:
+- `try_buildup i=2 j=1 path=.../emu-real-2/listener:179 connect=0` — node2 の listener への
+  接続は成功している。
+- `payload self=1 peer=2 len=81` — node1 の BGP OPEN を controller は受信している。
+- しかし以降 `payload self=2 ...` が出ず、`n_channel` は 0 のまま。すなわち
+  controller は OPEN を受けたが **対向 (2,1) チャネルへ中継していない**か、node2 へ届いて
+  いない。`node_replay_one_msg` は BGP_OPEN を常に replay する実装なので、チャネル状態
+  （`get(2,1)` の state）または配送（`sendmsg`→pollout）の成立を DEBUG ログで確認するのが次段。
+
+
 
 
 
