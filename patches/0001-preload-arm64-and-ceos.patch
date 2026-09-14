@@ -46,7 +46,7 @@ index 44e607a..7ae674d 100644
      fcntl_orig(fd, F_SETFD, flags | FD_CLOEXEC);
      fd2ptr_[fd] = nullptr;
 diff --git a/preload/preload.cpp b/preload/preload.cpp
-index 8fcf0b4..3d767e3 100644
+index 8fcf0b4..fc7d315 100644
 --- a/preload/preload.cpp
 +++ b/preload/preload.cpp
 @@ -99,7 +99,7 @@ void initialize_port() {
@@ -130,6 +130,30 @@ index 8fcf0b4..3d767e3 100644
          auto fdesc_ptr = std::make_unique<fdesc>(ret);
          int ufd = glb_fdset.emplace(std::move(fdesc_ptr));
          return ufd;
+@@ -1826,6 +1844,11 @@ PRELOAD5(getsockopt, int, int, sockfd, int, level, int, optname,
+     std::string optname_str = psockopt_optname(level, optname, optval);
+     LOG("Entering getsockopt(%d, %s)\n",
+         sockfd, level_str.c_str());
++#ifdef IMAGE_CEOS
++    fprintf(stderr, "[anyreal] GETSOCKOPT fd=%d level=%d optname=%d optlen=%u managed=%d\n",
++            sockfd, level, optname, optlen ? (unsigned)*optlen : 0u,
++            (int)glb_fdset.contains(sockfd));
++#endif
+ 
+ #ifdef LOG_ONLY
+ {
+@@ -1853,6 +1876,11 @@ PRELOAD5(setsockopt, int, int, sockfd, int, level, int, optname,
+     std::string optname_str = psockopt_optname(level, optname, optval);
+     LOG("Entering setsockopt(sockfd=%d, level=%s)\n",
+             sockfd, level_str.c_str());
++#ifdef IMAGE_CEOS
++    fprintf(stderr, "[anyreal] SETSOCKOPT fd=%d level=%d optname=%d optlen=%u managed=%d\n",
++            sockfd, level, optname, (unsigned)optlen,
++            (int)glb_fdset.contains(sockfd));
++#endif
+ 
+ #ifdef LOG_ONLY
+ {
 diff --git a/preload/preload.h b/preload/preload.h
 index fa77f93..f612f05 100644
 --- a/preload/preload.h
@@ -152,14 +176,147 @@ index fa77f93..f612f05 100644
  
  struct peer {
 diff --git a/preload/tcp.cpp b/preload/tcp.cpp
-index 869c0f1..9660056 100644
+index 869c0f1..cec555e 100644
 --- a/preload/tcp.cpp
 +++ b/preload/tcp.cpp
-@@ -767,7 +767,12 @@ tcp_fdesc::getsockopt_tcp_socket_impl(
+@@ -5,6 +5,25 @@
+ 
+ std::atomic<size_t> nxt_seq = 1;
+ 
++void tcp_fdesc::store_opt(int level, int optname, const void *optval, socklen_t optlen) {
++    if (!optval || optlen == 0) return;
++    uint64_t key = ((uint64_t)(uint32_t)level << 32) | (uint32_t)optname;
++    sockopt_store_[key].assign((const char *)optval, (const char *)optval + optlen);
++}
++
++bool tcp_fdesc::replay_opt(int level, int optname, void *optval, socklen_t *optlen) {
++    if (optlen == nullptr) return false;
++    uint64_t key = ((uint64_t)(uint32_t)level << 32) | (uint32_t)optname;
++    auto it = sockopt_store_.find(key);
++    if (it == sockopt_store_.end()) return false;
++    socklen_t want = (socklen_t)it->second.size();
++    if (optval && *optlen >= want) {
++        memcpy(optval, it->second.data(), want);
++    }
++    *optlen = want;
++    return true;
++}
++
+ bool tcp_fdesc::is_bgp_conn() const {
+     return is_bgp_ && !is_listener;
+ }
+@@ -116,8 +135,11 @@ ssize_t tcp_fdesc::send(const void *buf, size_t len, int flags)
+     PRELOAD_ORIG(send);
+     LOG("Entering normal send(%d, %p, %ld, %x)\n",
+         fd, buf, len, flags);
+-    assert(0);
+-    return -1;
++    if (!this->is_bgp_) {
++        return send_orig(this->fd, buf, len, flags);
++    }
++    // AnyREAL: BGP daemons (cEOS) may use send()/recv() instead of write()/read().
++    return this->write(buf, len);
+ }
+ 
+ ssize_t tcp_fdesc::writev(const struct iovec *iov, int iovcnt)
+@@ -618,45 +640,76 @@ ssize_t
+ tcp_fdesc::sendmsg(const struct msghdr * msg, int flags)
+ {
+     PRELOAD_ORIG(sendmsg);
+-    debug_assert(0);
+-    return -1;
++    if (!this->is_bgp_) {
++        return sendmsg_orig(this->fd, msg, flags);
++    }
++    ssize_t total = 0;
++    for (size_t i = 0; i < msg->msg_iovlen; ++i) {
++        ssize_t r = this->write(msg->msg_iov[i].iov_base, msg->msg_iov[i].iov_len);
++        if (r < 0) {
++            return total > 0 ? total : r;
++        }
++        total += r;
++    }
++    return total;
+ }
+ 
+ ssize_t
+ tcp_fdesc::recv(void *buf, size_t len, int flags)
+ {
+     PRELOAD_ORIG(recv);
+-    debug_assert(0);
+-    return -1;
++    if (!this->is_bgp_) {
++        return recv_orig(this->fd, buf, len, flags);
++    }
++    return this->read(buf, len);
+ }
+ 
+ ssize_t tcp_fdesc::recvfrom(void *buf, size_t len, int flags, struct sockaddr *src_addr, socklen_t *addrlen)
+ {
+     PRELOAD_ORIG(recvfrom);
+-    debug_assert(0);
+-    return -1;
++    if (!this->is_bgp_) {
++        return recvfrom_orig(this->fd, buf, len, flags, src_addr, addrlen);
++    }
++    ssize_t r = this->read(buf, len);
++    if (r >= 0 && src_addr != nullptr && addrlen != nullptr) {
++        struct sockaddr_in *in = (struct sockaddr_in *)src_addr;
++        *in = {
++            .sin_family = AF_INET,
++            .sin_port = this->peer_port,
++            .sin_addr = { this->peer_addr }
++        };
++        *addrlen = sizeof(struct sockaddr_in);
++    }
++    return r;
+ }
+ 
+ ssize_t tcp_fdesc::recvmsg(struct msghdr *msg, int flags)
+ {
+     PRELOAD_ORIG(recvmsg);
+-    debug_assert(0);
+-    return -1;
++    if (!this->is_bgp_) {
++        return recvmsg_orig(this->fd, msg, flags);
++    }
++    if (msg->msg_iovlen == 0) {
++        return 0;
++    }
++    ssize_t r = this->read(msg->msg_iov[0].iov_base, msg->msg_iov[0].iov_len);
++    if (r >= 0) {
++        msg->msg_flags = 0;
++    }
++    return r;
+ }
+ 
+ ssize_t tcp_fdesc::sendto(const void *buf, size_t len, int flags, const struct sockaddr *dest_addr, socklen_t addrlen)
+ {
++    if (!this->is_bgp_) {
++        PRELOAD_ORIG(sendto);
++        return sendto_orig(this->fd, buf, len, flags, dest_addr, addrlen);
++    }
+     if (this->sock_state_ != REAL_TCP_ESTABLISHED) {
+         errno = ENOTCONN;
+         return -1;
+     }
+-    PRELOAD_ORIG(sendto);
+-    std::string addr_str = paddr(dest_addr, addrlen);
+-    LOG("Entering TCP sendto(%d, %p, %ld, %x, %s)\n",
+-        fd, buf, len, flags, addr_str.c_str());
+-    LOG("TCP sendto() not implemented\n");
+-    debug_assert(0);
+-    return -1;
++    return this->send(buf, len, flags);
+ }
+ 
+ int tcp_fdesc::bind(const struct sockaddr * addr, socklen_t addrlen)
+@@ -767,7 +820,13 @@ tcp_fdesc::getsockopt_tcp_socket_impl(
      default:
          fprintf(stderr, "optname=%d\n", optname);
          LOG("optname=%d\n", optname);
 +#ifdef IMAGE_CEOS
++        if (replay_opt(level, optname, optval, optlen)) return 0;
 +        *optlen = 0;
 +        return 0;
 +#else
@@ -168,11 +325,12 @@ index 869c0f1..9660056 100644
          break;
      }
      return 0;
-@@ -790,7 +795,12 @@ tcp_fdesc::getsockopt_tcp_ip_impl(
+@@ -790,7 +849,13 @@ tcp_fdesc::getsockopt_tcp_ip_impl(
          break;
      default:
          fprintf(stderr, "optname=%d\n", optname);
 +#ifdef IMAGE_CEOS
++        if (replay_opt(level, optname, optval, optlen)) return 0;
 +        *optlen = 0;
 +        return 0;
 +#else
@@ -181,11 +339,12 @@ index 869c0f1..9660056 100644
          break;
      }
      return 0;
-@@ -818,7 +828,12 @@ tcp_fdesc::getsockopt_tcp_tcp_impl(
+@@ -818,7 +883,13 @@ tcp_fdesc::getsockopt_tcp_tcp_impl(
          break;
      default:
          fprintf(stderr, "optname=%d\n", optname);
 +#ifdef IMAGE_CEOS
++        if (replay_opt(level, optname, optval, optlen)) return 0;
 +        *optlen = 0;
 +        return 0;
 +#else
@@ -194,7 +353,7 @@ index 869c0f1..9660056 100644
          break;
      }
      return 0;
-@@ -907,7 +922,11 @@ tcp_fdesc::setsockopt_tcp_ip_impl(
+@@ -907,7 +978,11 @@ tcp_fdesc::setsockopt_tcp_ip_impl(
          break;
      default:
          fprintf(stderr, "optname=%d\n", optname);
@@ -206,7 +365,7 @@ index 869c0f1..9660056 100644
          break;
      }
      return 0;
-@@ -931,7 +950,11 @@ tcp_fdesc::setsockopt_tcp_tcp_impl(
+@@ -931,7 +1006,11 @@ tcp_fdesc::setsockopt_tcp_tcp_impl(
          break;
      default:
          fprintf(stderr, "optname=%d\n", optname);
@@ -218,3 +377,27 @@ index 869c0f1..9660056 100644
          break;
      }
      return 0;
+@@ -944,6 +1023,7 @@ tcp_fdesc::setsockopt(
+ )
+ {
+     LOG("at TCP setsockopt(), fd=%d\n", this->fd);
++    store_opt(level, optname, optval, optlen);
+     int ret = 0;
+     switch (level) {
+     case SOL_SOCKET:
+diff --git a/preload/tcp.h b/preload/tcp.h
+index 0b134aa..c96ccd0 100644
+--- a/preload/tcp.h
++++ b/preload/tcp.h
+@@ -129,6 +129,11 @@ protected:
+         int level, int optname,
+         void *optval, socklen_t *optlen
+     );
++    /* AnyREAL: remember set options so getsockopt round-trips succeed for NOS
++       libraries that verify options (e.g. cEOS Arnet TCP-AO/MD5). */
++    void store_opt(int level, int optname, const void *optval, socklen_t optlen);
++    bool replay_opt(int level, int optname, void *optval, socklen_t *optlen);
++    std::map<uint64_t, std::vector<char>> sockopt_store_;
+     int
+     getsockopt_tcp_tcp_impl(
+         int level, int optname,

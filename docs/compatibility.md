@@ -138,6 +138,22 @@ M6 の結論（方針）:
 cEOS では「対象プロセスには実 TCP ソケットを持たせ、`connect()` を broker 側のローカル中継へ
 向ける」方式（ソケットオブジェクトを置換しない）を検討する。
 
+### B: preload の cEOS 適合（進行）
+
+計測により、socketpair（fake-fd）方式のままでも cEOS `Bgp` を通せることが判明:
+1. `Arnet::setSocketOptionInteger` の assert は式 `valueLength == sizeof(verificationValue)`。
+   `setsockopt` したオプションを `tcp_fdesc` に記憶し `getsockopt` で同じ値・長さを返す
+   （`store_opt`/`replay_opt`）ことで解消。**実 TCP に逃げずに済む**。
+2. cEOS の `Bgp` は `send/recv/sendmsg/recvmsg/sendto/recvfrom` を使うため、`tcp_fdesc` の
+   未実装パス（`debug_assert(0)`）を read/write 経路へ委譲して実装。
+3. その結果、`Bgp` は **BGP connect 段**まで到達。残る assert は `tcp.cpp:472`
+   `debug_assert(r == 0)` = controller の manager socket が無い（`ENOENT`）ことによるもので、
+   **controller を起動すれば解消する見込み**。
+
+この結果は「cEOS 用に実 TCP へ全面フォールバック」ではなく、**socketpair/UNIX のまま
+（REAL の効率思想を維持して）cEOS を通せる**方向を示す。次は controller を
+`ceos` トポロジで起動し、共有 `/ripc` 経由で 2 ノードの BGP を確立する。
+
 ### B: broker の多プロセス対応（実装済み・回帰なし）
 
 - `seccomp_notif.pid` は tid のため、`/proc/<tid>/status` の Tgid でプロセス単位に正規化。
@@ -146,8 +162,9 @@ cEOS では「対象プロセスには実 TCP ソケットを持たせ、`connec
   複数プロセスの socket を 1 つの broker が扱える。
 - 単一プロセス（GoBGP）の M2/M3 は回帰なしで成功を確認。
 
-次段: D の示唆に沿い、cEOS では socketpair ではなく **実 TCP ソケットを維持**したまま
-`connect()` を broker の中継先へ向ける方式を実装する（Arnet のオプション検証を満たすため）。
+（注: preload 適合の結果、cEOS でも socketpair/UNIX のままで通せる見込みとなったため、
+実 TCP へのフォールバックは不要になった。broker を cEOS へ適用する場合も同じ
+`store_opt`/`replay_opt` 相当を broker 側に持たせればよい。）
 
 
 
