@@ -106,6 +106,21 @@ M3 シナリオを N 回実行し、成功数と broker の syscall 通知数・
 （`ANYREAL_STATS=1` で broker が終了時に `[anyreal-stats]` を stderr へ出力）。
 性能の native 比較（CPU・peak memory・収束時間）は未実装。
 
+## 8. cEOS 通常起動（M5）
+
+```bash
+scripts/experiments/run_m5_ceos.sh
+```
+
+ARM64 cEOS 2 台を containerlab 相当設定で起動し、Docker bridge 上で eBGP を確立して
+`192.168.1.0/24` の広告・撤回を確認する。成功時は `M5_CEOS_PASS`。
+
+メモ:
+- ノードの flash は共有しない（各ノード個別。共有するとクローンになる）。
+- `router bgp` の前に `ip routing` が必要。
+- CLI は `/usr/bin/Cli`（= FastCli）。EOS の出力は `Estab` と省略される。
+
+
 
 
 ## 実験 ID に含めるもの

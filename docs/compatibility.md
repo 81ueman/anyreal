@@ -83,4 +83,16 @@ native の read/write を使う設計であり捕捉対象に含めない。
 
 | 項目 | 値 | 状態 |
 | --- | --- | --- |
-| ARM64 native イメージ | 未取得 | TODO（M0 で取得可否確認） |
+| イメージ | `ceos:4.36.0.1F`（arm64, 2.74GB, image id `b732cecde18a`） | 確認済み |
+| 起動 | containerlab 相当（privileged, `CEOS/EOS_PLATFORM=ceoslab/INTFTYPE=eth/MAPETH0/MGMT_INTF=eth0`, `/sbin/init` + `systemd.setenv`） | 確認済み |
+| CLI | `/usr/bin/Cli -> /usr/bin/FastCli`。`Cli -p 15 -c '...'` | 確認済み |
+| BGP 起動 | `ip routing` を有効化してから `router bgp <as>`。ProcMgr/Launcher が `Bgp` を起動 | 確認済み |
+| 2 ノード session | Docker bridge 上で eBGP Established、`192.168.1.0/24` の広告・撤回 | 確認済み（M5） |
+| `Bgp` の実体 | 動的リンク aarch64 ELF。`libc.so.6`, `libstdc++`, `libAgentBase.so`, `libMarco.so` に依存 | 確認済み |
+| プロセス/IPC | PID1 systemd、`ProcMgr`、`Sysdb`(Python)、`ConfigAgent`、`Launcher`、各種 agent。UNIX socket/共有メモリで連携 | 確認済み（概要） |
+| 多数プロセスへの filter 継承 | PID1 に filter を入れ子孫へ継承させる方針。broker 側で `n->pid` を使う対応が必要 | 未検証 |
+
+`Bgp` が libc リンクであることは、元 REAL の `LD_PRELOAD` 方式が cEOS の BGP にも
+適用できる可能性を示す。AnyREAL の seccomp broker でも同じ境界を扱える。M6 では
+どちらを使うか（または併用）を、実際の socket 呼び出しの捕捉で決める。
+
