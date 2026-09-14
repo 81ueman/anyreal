@@ -125,6 +125,20 @@ M6 の結論（方針）:
 - 次は seccomp broker を多プロセス対応にして cEOS を統一する（PID1 に filter、broker が
   `seccomp_notif.pid` ごとに fd table・メモリ操作）。REAL controller のプロトコルは流用する。
 
+### D: cEOS 側 assert の解析結果
+
+- assert 関数は `Arnet::setSocketOptionInteger`（`libTcpClientServer.so`, `TcpClientServer.tin:147`）。
+- cEOS の `Bgp` は BGP ソケットに `level=IPPROTO_TCP` で `optname=14`(TCP_MD5SIG) /
+  `optname=32`(TCP_MD5SIG_EXT) 相当、および SOL_SOCKET オプションを設定し、`setsockopt` が
+  失敗すると自前で assert する（逆アセンブルで確認）。
+- preload は AF_INET ソケットを AF_UNIX に置換するため、実 TCP のオプション意味論
+  （戻り値・`getsockopt` での検証・ソケット family）を満たせず assert に至る。
+
+**B への示唆**: seccomp broker も socketpair(AF_UNIX) を使うため同じ壁に当たり得る。
+cEOS では「対象プロセスには実 TCP ソケットを持たせ、`connect()` を broker 側のローカル中継へ
+向ける」方式（ソケットオブジェクトを置換しない）を検討する。
+
+
 
 
 
