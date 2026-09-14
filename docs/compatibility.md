@@ -63,6 +63,9 @@ native の read/write を使う設計であり捕捉対象に含めない。
   proxy する。broker と対象が同一 network namespace にある場合のみ成立。
 - fd の寿命管理は `close` の横取りと socketpair の EOF に依存する。対象が
   broker より先に強制終了した場合は後始末が遅れる。
+- epoll のイベントは fd 番号で引く。同一 `epoll_wait` バッチ内で先行イベントが
+  vsock を破棄しても、後続イベントが解放済みポインタを参照しない（M2 並行テストで
+  観測した use-after-free の修正）。
 - controller の two-phase / run-to-idle は `R2I_DISABLED` + `TWO_PHASE_DISABLED` で
   通常実行モードとして使用。iterative convergence は未検証。
 - vDSO 経由の時計は捕捉しないため実時間動作のみ。

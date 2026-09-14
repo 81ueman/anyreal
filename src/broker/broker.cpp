@@ -180,7 +180,7 @@ class Broker {
         struct epoll_event ev;
         memset(&ev, 0, sizeof(ev));
         ev.events = EPOLLIN;
-        ev.data.ptr = nullptr;
+        ev.data.fd = listener_fd_;
         epoll_ctl(epfd_, EPOLL_CTL_ADD, listener_fd_, &ev);
         set_nonblock(listener_fd_, true);
 
@@ -193,16 +193,22 @@ class Broker {
                 return 1;
             }
             for (int i = 0; i < n; ++i) {
+                int fd = events[i].data.fd;
                 if (getenv("ANYREAL_DEBUG")) {
-                    FdCtx *c = static_cast<FdCtx *>(events[i].data.ptr);
-                    fprintf(stderr, "[broker] epoll event ptr=%p kind=%d ev=0x%x\n",
-                            (void *)c, c ? (int)c->kind : -1, events[i].events);
+                    auto it = fd_ctx_.find(fd);
+                    fprintf(stderr, "[broker] epoll fd=%d kind=%d ev=0x%x\n", fd,
+                            it == fd_ctx_.end() ? -1 : (int)it->second.kind,
+                            events[i].events);
                 }
-                if (events[i].data.ptr == nullptr) {
+                if (fd == listener_fd_) {
                     handle_notifications();
                     continue;
                 }
-                FdCtx *ctx = static_cast<FdCtx *>(events[i].data.ptr);
+                // The fd may have been closed earlier in this same event batch;
+                // look it up fresh instead of trusting a stored pointer.
+                auto it = fd_ctx_.find(fd);
+                if (it == fd_ctx_.end()) continue;
+                FdCtx *ctx = &it->second;
                 switch (ctx->kind) {
                 case FdKind::BrokerEnd:
                     on_broker_end(ctx->vs);
@@ -227,37 +233,24 @@ class Broker {
   private:
     // ---- epoll bookkeeping -------------------------------------------------
     FdCtx *track(int fd, VSock *vs, FdKind kind) {
-        auto ctx = std::make_unique<FdCtx>();
-        ctx->vs = vs;
-        ctx->kind = kind;
-        FdCtx *p = ctx.get();
-        ctx_pool_.push_back(std::move(ctx));
         struct epoll_event ev;
         memset(&ev, 0, sizeof(ev));
         ev.events = EPOLLIN;
-        ev.data.ptr = p;
+        ev.data.fd = fd;
         if (epoll_ctl(epfd_, EPOLL_CTL_ADD, fd, &ev) < 0) {
-            ctx_pool_.pop_back();
             return nullptr;
         }
-        fd_ctx_[fd] = p;
+        fd_ctx_[fd] = FdCtx{vs, kind};
         if (getenv("ANYREAL_DEBUG"))
             fprintf(stderr, "[broker] track fd=%d kind=%d\n", fd, (int)kind);
-        return p;
+        return &fd_ctx_[fd];
     }
 
     void untrack(int fd) {
         auto it = fd_ctx_.find(fd);
         if (it == fd_ctx_.end()) return;
         epoll_ctl(epfd_, EPOLL_CTL_DEL, fd, nullptr);
-        FdCtx *p = it->second;
         fd_ctx_.erase(it);
-        for (size_t i = 0; i < ctx_pool_.size(); ++i) {
-            if (ctx_pool_[i].get() == p) {
-                ctx_pool_.erase(ctx_pool_.begin() + i);
-                break;
-            }
-        }
     }
 
     void destroy(VSock *vs) {
@@ -1134,8 +1127,7 @@ class Broker {
     BrokerConfig cfg_;
     int epfd_ = -1;
     std::unordered_map<int, std::unique_ptr<VSock>> by_app_fd_;
-    std::unordered_map<int, FdCtx *> fd_ctx_;
-    std::vector<std::unique_ptr<FdCtx>> ctx_pool_;
+    std::unordered_map<int, FdCtx> fd_ctx_;
     std::unordered_map<int, Peer> by_peer_id_;
     std::unordered_map<in_addr_t, int> by_peer_addr_;
 };
