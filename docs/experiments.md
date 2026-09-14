@@ -39,7 +39,19 @@ TODO: バイナリ固定、設定生成、RIB 取得、syscall trace。
 
 ## 4. M2 最小 syscall PoC
 
-TODO: `tests/m2/` の手順を記述。
+```bash
+cd /work/src && make          # anyreal-run, m2-relay
+cd /work/tests/m2 && CGO_ENABLED=0 go build -o /work/build/m2-server ./server \
+    && CGO_ENABLED=0 go build -o /work/build/m2-client ./client
+cd /work && scripts/experiments/run_m2.sh
+```
+
+`run_m2.sh` は M2 relay（`src/relay/m2_relay.cpp`）と 2 つの未改変 Go プログラムを
+起動し、100 逐次 + 16 並行の echo 接続を検証する。成功時は `M2 PASS`。
+
+## 5. GoBGP を broker で動かす / REAL controller 接続（M3）
+
+TODO: `anyreal-run --real` と controller の起動手順を記述。
 
 ## 実験 ID に含めるもの
 

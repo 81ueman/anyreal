@@ -1,6 +1,6 @@
-# ADR 0001: syscall backend の選定（提案）
+# ADR 0001: syscall backend の選定
 
-- 状態: Proposed（M2 の結果待ち）
+- 状態: Accepted（M2 で必須ケースを確認）
 - 日付: 2026-09-14
 
 ## 文脈
