@@ -148,6 +148,9 @@ struct VSock {
     bool connected = false;
     int domain = AF_INET;
     int sk_err = 0;
+    // AnyREAL: remember set options so getsockopt round-trips succeed for NOS
+    // libraries that verify options (e.g. cEOS Arnet TCP-AO/MD5).
+    std::unordered_map<uint64_t, std::vector<char>> sockopts;
     bool nodelay = true;
 
     in_addr_t self_addr = 0;
@@ -721,9 +724,10 @@ class Broker {
         socklen_t optlen = 0;
         if (optlen_p) read_mem(cur_pid_, optlen_p, &optlen, sizeof(optlen));
 
-        char buf[256];
+        char buf[4096];
         memset(buf, 0, sizeof(buf));
         socklen_t out = 0;
+        bool replay = false;
         auto put_int = [&](int v) {
             memcpy(buf, &v, sizeof(v));
             out = sizeof(v);
@@ -757,6 +761,7 @@ class Broker {
                 put_int(0);
                 break;
             default:
+                replay = true;
                 out = optlen;
                 break;
             }
@@ -772,11 +777,22 @@ class Broker {
                 out = sizeof(struct tcp_info);
                 break;
             default:
+                replay = true;
                 out = optlen;
                 break;
             }
         } else {
+            replay = true;
             out = optlen;
+        }
+        if (replay) {
+            uint64_t key = ((uint64_t)(uint32_t)level << 32) | (uint32_t)opt;
+            auto it = vs->sockopts.find(key);
+            if (it != vs->sockopts.end() && !it->second.empty() &&
+                it->second.size() <= sizeof(buf)) {
+                memcpy(buf, it->second.data(), it->second.size());
+                out = (socklen_t)it->second.size();
+            }
         }
         if (out > optlen && optlen != 0) out = optlen;
         if (out > sizeof(buf)) out = sizeof(buf);
@@ -795,10 +811,19 @@ class Broker {
         }
         int level = (int)n->data.args[1];
         int opt = (int)n->data.args[2];
+        const void *soptval = (const void *)n->data.args[3];
+        socklen_t soptlen = (socklen_t)n->data.args[4];
         if (level == IPPROTO_TCP && opt == TCP_NODELAY) {
             int v = 0;
             read_mem(cur_pid_, (void *)n->data.args[3], &v, sizeof(v));
             vs->nodelay = v != 0;
+        }
+        if (soptval && soptlen && soptlen <= 4096) {
+            std::vector<char> v(soptlen);
+            if (read_mem(cur_pid_, soptval, v.data(), soptlen) == (ssize_t)soptlen) {
+                uint64_t key = ((uint64_t)(uint32_t)level << 32) | (uint32_t)opt;
+                vs->sockopts[key] = std::move(v);
+            }
         }
         resp_ok(resp, n->id, 0);
         return true;

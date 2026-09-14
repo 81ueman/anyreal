@@ -20,6 +20,7 @@
 
 #include <arpa/inet.h>
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -29,20 +30,37 @@ namespace {
 
 std::vector<sock_filter> build_filter() {
     std::vector<sock_filter> f;
-    f.push_back(BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch)));
-    f.push_back(BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AUDIT_ARCH_AARCH64, 1, 0));
-    f.push_back(BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW));
-    f.push_back(BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)));
+    auto stmt = [&](unsigned short code, unsigned int k) {
+        sock_filter s{};
+        s.code = code;
+        s.jt = 0;
+        s.jf = 0;
+        s.k = k;
+        f.push_back(s);
+    };
+    auto jump = [&](unsigned short code, unsigned int k, unsigned char jt,
+                    unsigned char jf) {
+        sock_filter s{};
+        s.code = code;
+        s.jt = jt;
+        s.jf = jf;
+        s.k = k;
+        f.push_back(s);
+    };
+    stmt(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch));
+    jump(BPF_JMP | BPF_JEQ | BPF_K, AUDIT_ARCH_AARCH64, 1, 0);
+    stmt(BPF_RET | BPF_K, SECCOMP_RET_ALLOW);
+    stmt(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr));
     const int syscalls[] = {
         __NR_socket,     __NR_connect,     __NR_bind,       __NR_listen,
         __NR_accept,     __NR_accept4,     __NR_getsockname, __NR_getpeername,
         __NR_getsockopt, __NR_setsockopt,  __NR_shutdown,   __NR_close,
     };
     for (int sc : syscalls) {
-        f.push_back(BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, sc, 0, 1));
-        f.push_back(BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_USER_NOTIF));
+        jump(BPF_JMP | BPF_JEQ | BPF_K, (unsigned int)sc, 0, 1);
+        stmt(BPF_RET | BPF_K, SECCOMP_RET_USER_NOTIF);
     }
-    f.push_back(BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW));
+    stmt(BPF_RET | BPF_K, SECCOMP_RET_ALLOW);
     return f;
 }
 

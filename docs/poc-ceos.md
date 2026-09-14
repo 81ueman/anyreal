@@ -48,8 +48,25 @@ ARM64 cEOS-lab を REAL controller の中継路で駆動する PoC の結果。�
   - 撤回の反映はホップ数に応じて遅い。検証はポーリングで行う。
   - NOS 全体（systemd/ProcMgr/Sysdb 等）は preload の hijack 対象外で native 動作。
 
+## seccomp broker 版での cEOS 適用（B: 試行）
+
+preload を使わない統一経路として、cEOS の PID1（`/sbin/init`）を `anyreal-run --real` で
+監視する方式も試した（`scripts/experiments/run_b_ceos.sh`）。
+
+- broker を **AlmaLinux 9（glibc 2.34）でビルド**して cEOS コンテナへ注入
+  （`build/anyreal-run-ala9`）。
+- broker 側にも preload と同じ **option store/replay** を追加（`setsockopt` を記憶し
+  `getsockopt` で返す）。
+- 結果: cEOS の boot が early に落ちた（systemd が起動を継続できず）。
+  - 原因候補: broker が cEOS の全プロセスの AF_INET/AF_INET6 stream socket を仮想化するため、
+    boot 中の socket パターン（多数・多様なオプション/待機）を満たせていない。
+  - broker は単一スレッドで、boot 時の通知量も負荷。
+
+現状は **preload 経路（M6）が cEOS の成立経路**。broker 統一は追加作業（対象プロセスの
+boot 時 socket の把握、必要なら per-process/非同期化）が必要。
+
 ## 次の候補
 
-- seccomp broker 版での cEOS 適用（preload を使わない統一経路）。
+- seccomp broker 版での cEOS 適用の継続（boot 時 socket の対応）。
 - peak memory・収束時間の native/AnyREAL 比較。
 - 混在 4 ノード（GoBGP + cEOS）、より大きいトポロジ。
