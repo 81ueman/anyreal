@@ -23,15 +23,25 @@ scripts/fetch_upstream.sh          # third_party/REAL を固定 commit で取得
 ## 2. 上流の ARM64 ビルド（M0）
 
 ```bash
-# preload（-mcx16 は ARM64 では外す）
+scripts/apply_patches.sh          # third_party/REAL に ARM64 移植などを適用
 make -C third_party/REAL/preload
-
-# controller
 make -C third_party/REAL/controller
-
-# lwc
 cargo build --release --manifest-path third_party/REAL/lwc/Cargo.toml
 ```
+
+FRR の baseline/preload 再現は ARM64 イメージをビルドして行う:
+
+```bash
+cd third_party/REAL/docker/frr
+curl -fsSL -o /tmp/frr.tgz https://github.com/FRRouting/frr/archive/refs/tags/frr-10.1.4.tar.gz
+tar -xzf /tmp/frr.tgz && mv frr-frr-10.1.4 frr
+docker build --platform linux/arm64 -t real-frr .
+```
+
+上流の `docker/frr/Dockerfile` は apt ミラーを TUNA へ書き換えるが、arm64 では
+`ports.ubuntu.com` が使われるため既定ミラーのままビルドされる。
+`real-frr` 取得後、`scripts/utils/lwc_load_img.sh` 相当で `/opt/lwc/image` へ展開する。
+
 
 ## 3. GoBGP の native 2 ノード（M1）
 
