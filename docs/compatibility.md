@@ -39,7 +39,8 @@ P-1 の計測: OrbStack/Rosetta 上の amd64 `gcc:14` で `seccomp(SECCOMP_SET_M
 | M2b（GoBGP を broker で実行） | 未改変 GoBGP v4.9.0 の 2 ノードで session Established、prefix 広告・撤回が成功（M2 relay 経由） | 確認済み |
 | M3（REAL controller 接続） | 未改変 GoBGP 2 ノードを **上流 controller 経由**で接続。session Established、`192.168.1.0/24` の広告・撤回が成功。controller の `n_channel: 2` と一致。3/3 回成功 | 確認済み |
 | M4-lite（反復と計測） | M3 シナリオ 3/3 成功。broker 通知数は node1 約 240 / node2 約 122（gRPC 操作の差）、bytes も再現的 | 確認済み |
-| 再接続（peer 再起動） | controller は STAGE 遷移時のみ node を再起動。CONVERGE 中の再接続は未対応 | 未検証 |
+| 切断（peer 停止） | peer 停止で session が落ちることを確認（M2 relay 経由） | 確認済み |
+| 再接続（peer 再起動） | relay の再ペアリングまでは確認。ピア再起動後の BGP 再確立は未確認 | 未検証 |
 
 ### GoBGP の network syscall（strace, `-e trace=%network`）
 

@@ -184,14 +184,13 @@ void on_data(int fd) {
     ssize_t r = read(fd, buf, sizeof(buf));
     if (r <= 0) {
         del_close(fd);
-        if (g_pair.count(peer)) {
-            int p = g_pair[peer];
-            g_pair.erase(peer);
-            g_pair.erase(fd);
-            if (p) {
-                shutdown(p, SHUT_WR);
-                del_close(p);
-            }
+        g_pair.erase(fd);
+        auto it = g_pair.find(peer);
+        if (it != g_pair.end()) {
+            int p = it->first;
+            g_pair.erase(it);
+            shutdown(p, SHUT_WR);
+            del_close(p);
         }
         return;
     }

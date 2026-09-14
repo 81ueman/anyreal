@@ -13,6 +13,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/time.h>
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -28,8 +29,20 @@ namespace anyreal {
 namespace {
 
 volatile sig_atomic_t g_stop = 0;
+volatile sig_atomic_t g_debug = 0;
 
-void on_stop_signal(int) { g_stop = 1; }
+void on_stop_signal(int sig) {
+    g_stop = 1;
+    if (g_debug) {
+        char buf[8];
+        buf[0] = 'S';
+        buf[1] = 'I';
+        buf[2] = 'G';
+        buf[3] = (char)('0' + (sig % 10));
+        buf[4] = '\n';
+        (void)!write(2, buf, 5);
+    }
+}
 
 constexpr int kMaxFrame = 1 << 16;
 
@@ -37,6 +50,13 @@ void set_nonblock(int fd, bool on) {
     int fl = fcntl(fd, F_GETFL, 0);
     if (fl < 0) return;
     fcntl(fd, F_SETFL, on ? (fl | O_NONBLOCK) : (fl & ~O_NONBLOCK));
+}
+
+// Bound blocking handshake I/O so a missing peer cannot wedge the broker.
+void set_timeout(int fd, int seconds) {
+    struct timeval tv{seconds, 0};
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 }
 
 int write_all(int fd, const void *buf, size_t n) {
@@ -142,11 +162,15 @@ class Broker {
     }
 
     int run() {
+        if (getenv("ANYREAL_DEBUG")) g_debug = 1;
         struct sigaction sa;
         memset(&sa, 0, sizeof(sa));
         sa.sa_handler = on_stop_signal;
         sigaction(SIGTERM, &sa, nullptr);
         sigaction(SIGINT, &sa, nullptr);
+        // Exit promptly when the supervised target dies (also breaks a blocking
+        // SECCOMP_IOCTL_NOTIF_RECV, which does not otherwise wake on target exit).
+        sigaction(SIGCHLD, &sa, nullptr);
         int rc = run_loop();
         if (getenv("ANYREAL_STATS")) dump_stats();
         return rc;
@@ -873,6 +897,7 @@ class Broker {
         if (!cfg_.use_real) {
             int fd = connect_unix(cfg_.relay_path);
             if (fd < 0) return -1;
+            set_timeout(fd, 5);
             M2Hdr h{};
             h.type = M2_CONNECT;
             h.a = (uint32_t)cfg_.self_id;
@@ -918,6 +943,7 @@ class Broker {
             close(fd);
             return -1;
         }
+        set_timeout(fd, 5);
         real_syn_t syn;
         memset(&syn, 0, sizeof(syn));
         syn.hdr.msg_type = REAL_SYN;
@@ -1048,6 +1074,7 @@ class Broker {
         }
         int cfd = accept(vs->listen_fd, nullptr, nullptr);
         if (cfd < 0) return;
+        set_timeout(cfd, 5);
         VSock::Pending p;
         p.fd = cfd;
         p.peer_id = -1;
