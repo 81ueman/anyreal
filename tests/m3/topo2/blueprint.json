@@ -1,0 +1,16 @@
+{
+  "routers": [
+    {
+      "idx": 1,
+      "neighbors": [
+        { "self_ip": "10.0.0.1", "neighbor_ip": "10.0.0.2", "peeridx": 2 }
+      ]
+    },
+    {
+      "idx": 2,
+      "neighbors": [
+        { "self_ip": "10.0.0.2", "neighbor_ip": "10.0.0.1", "peeridx": 1 }
+      ]
+    }
+  ]
+}

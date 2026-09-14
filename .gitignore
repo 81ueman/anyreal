@@ -18,3 +18,5 @@ third_party/gobgp/
 
 # Tooling
 .DS_Store
+core
+core.*

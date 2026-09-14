@@ -58,7 +58,25 @@ typedef struct { real_hdr_t hdr; int32_t src_id; int32_t dst_id; } real_pld_t;
 | controller | そのまま | そのまま利用（通常実行モードを追加） |
 | lwc | そのまま | Launcher として利用 |
 
-## 上流への ARM64 移植差分
+## AnyREAL パッチ一覧
+
+`patches/` に置き、`scripts/apply_patches.sh` が `third_party/REAL` へ適用する
+（`scripts/fetch_upstream.sh` から自動で呼ばれる）。
+
+| パッチ | 対象 | 内容 | 理由 |
+| --- | --- | --- | --- |
+| `0001-preload-arm64-port.patch` | `preload/` | `-mcx16` を x86_64 以外では外す。`SYS_open`/`SYS_dup2` を `openat`/`dup3` に置換 | ARM64 に存在しない |
+| `0002-controller-gobgp-adapter.patch` | `controller/node_ops.cpp` | `image == "gobgp"` の起動・停止・再起動・RIB 出力を追加。`anyreal-run` を起動し broker 経由で接続 | NOS adapter（PLAN.md §4.2） |
+| `0003-controller-single-part-convergence.patch` | `controller/main.cpp` | 単一 part（非 iterative）で `globally_converged()` が成立せず `glb_all_parts[-1]` を参照して落ちる問題を修正。`ANYREAL_CONVERGE_SEC` で観測窓を延長可能に | v0.1 の通常実行モード |
+
+### パスに関する注意
+
+上流 controller は接続元 UDS path を `sscanf("/ripc/emu-real-%d/%d")` で解析し、
+listener へは `/opt/lwc/volumes/ripc/emu-real-<id>/listener:179` で接続する。
+一方 broker は文字列として `/ripc/...` に bind する必要がある。そのため実行環境では
+`/ripc` を `/opt/lwc/volumes/ripc` への symlink にする（`run_m3.sh` が実施）。
+
+## 上流への ARM64 移植差分（0001 の詳細）
 
 `patches/` に置く。判明している項目:
 

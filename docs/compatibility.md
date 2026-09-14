@@ -37,7 +37,20 @@ P-1 の計測: OrbStack/Rosetta 上の amd64 `gcc:14` で `seccomp(SECCOMP_SET_M
 | AF_INET / AF_INET6 | Go のワイルドカード listen は IPv6 dual-stack になるため両方を仮想化（v4-mapped） | 確認済み |
 | M2（Go 小プログラム） | 100 逐次 + 16 並行の echo 接続が成功。close・FD 再利用を含む | 確認済み |
 | M2b（GoBGP を broker で実行） | 未改変 GoBGP v4.9.0 の 2 ノードで session Established、prefix 広告・撤回が成功（M2 relay 経由） | 確認済み |
-| REAL controller 接続 | broker の `--real` 実装あり。統合は M3 で検証 | 実装済み・未検証 |
+| M3（REAL controller 接続） | 未改変 GoBGP 2 ノードを **上流 controller 経由**で接続。session Established、`192.168.1.0/24` の広告・撤回が成功。controller の `n_channel: 2` と一致。3/3 回成功 | 確認済み |
+| 再接続（peer 再起動） | controller は STAGE 遷移時のみ node を再起動。CONVERGE 中の再接続は未対応 | 未検証 |
+
+## 既知の制約（PoC 1 時点）
+
+- broker は単一スレッド。通知処理中の同期ハンドシェイク（REAL の SYN/SYNACK 等）は
+  他の通知を一時的に止める。並行性の検証は M2 の小実験まで。
+- 非 BGP の AF_INET listener（GoBGP の gRPC 等）は broker が実 socket を張って
+  proxy する。broker と対象が同一 network namespace にある場合のみ成立。
+- fd の寿命管理は `close` の横取りと socketpair の EOF に依存する。対象が
+  broker より先に強制終了した場合は後始末が遅れる。
+- controller の two-phase / run-to-idle は `R2I_DISABLED` + `TWO_PHASE_DISABLED` で
+  通常実行モードとして使用。iterative convergence は未検証。
+- vDSO 経由の時計は捕捉しないため実時間動作のみ。
 
 ## FRR（比較・回帰）
 

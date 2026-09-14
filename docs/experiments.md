@@ -60,7 +60,18 @@ scripts/experiments/run_m2_gobgp.sh
 
 ## 6. REAL controller 接続（M3）
 
-TODO: `anyreal-run --real` と controller の起動手順を記述。
+```bash
+scripts/experiments/run_m3.sh
+```
+
+未改変の `gobgpd` 2 台を **上流 REAL controller** 経由で接続する。controller が
+`conf/gobgp/topo2/blueprint.json` を読み、`node_ops.cpp` の gobgp adapter 経由で
+`anyreal-run --real` を起動する。`/ripc` は `/opt/lwc/volumes/ripc` への symlink。
+成功時は `M3_PASS`。
+
+- 観測窓は `CONVERGE_SEC`（既定 30 秒, controller の `ANYREAL_CONVERGE_SEC`）。
+- controller は `R2I_DISABLED=1 TWO_PHASE_DISABLED=1` でビルドする（通常実行モード）。
+
 
 ## 実験 ID に含めるもの
 

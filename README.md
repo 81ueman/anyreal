@@ -39,7 +39,21 @@ GoBGP process                      broker (this repo)                controller 
 
 ## 状態
 
-PoC 1（GoBGP）を進行中。現状は [`docs/experiments.md`](docs/experiments.md) を参照。
+PoC 1（GoBGP）の主要経路が成立。未改変 GoBGP 2 ノードを seccomp broker 配下で起動し、
+上流 REAL controller 経由で BGP session 確立・経路広告・撤回まで確認済み。
+
+| 段階 | 状態 |
+| --- | --- |
+| M0: ARM64 ビルド | preload/controller/lwc が aarch64 でビルド。FRR 再現は未実施 |
+| M1: native GoBGP | 2 ノード Established・広告・撤回 確認 |
+| M2: 最小 syscall PoC | Go echo 100 逐次 + 16 並行 成功 |
+| M2b: GoBGP + broker | 2 ノード Established・広告・撤回 成功（M2 relay） |
+| M3: REAL controller | 2 ノード Established・広告・撤回 成功（上流 controller, 3/3） |
+| M4: 判定・計測 | 未着手 |
+| M5-M7: cEOS | 未着手 |
+
+再現手順と制約は [`docs/experiments.md`](docs/experiments.md)、
+[`docs/compatibility.md`](docs/compatibility.md) を参照。
 
 ## 由来とライセンス
 

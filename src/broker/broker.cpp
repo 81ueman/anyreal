@@ -935,7 +935,7 @@ class Broker {
         ssize_t r = read(vs->broker_end, buf, sizeof(buf));
         if (r <= 0) return;
         if (vs->backhaul_fd < 0) return;
-        if (cfg_.use_real) {
+        if (cfg_.use_real && vs->is_bgp) {
             real_pld_t pld;
             memset(&pld, 0, sizeof(pld));
             pld.hdr.msg_type = REAL_PAYLOAD;
@@ -971,7 +971,7 @@ class Broker {
     }
 
     void on_backhaul(VSock *vs) {
-        if (cfg_.use_real) {
+        if (cfg_.use_real && vs->is_bgp) {
             real_pld_t pld;
             if (read_all(vs->backhaul_fd, &pld, pldhdrsiz) < 0) {
                 shutdown(vs->broker_end, SHUT_WR);

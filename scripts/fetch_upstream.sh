@@ -22,3 +22,6 @@ git fetch --depth 1 origin "${COMMIT}"
 git checkout --detach "${COMMIT}"
 echo "Upstream REAL at ${COMMIT}:"
 git rev-parse HEAD
+
+echo "Applying AnyREAL patches..."
+"$(dirname "${BASH_SOURCE[0]}")/apply_patches.sh"

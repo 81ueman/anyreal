@@ -1,0 +1,31 @@
+diff --git a/controller/main.cpp b/controller/main.cpp
+index 8a5b2ec..1921911 100644
+--- a/controller/main.cpp
++++ b/controller/main.cpp
+@@ -301,6 +301,12 @@ std::string get_addr(int id, uint16_t port) {
+ }
+ 
+ inline bool globally_converged() {
++    // AnyREAL: with a single part (non-iterative), n_parts == 0 and the single
++    // idle part is the whole topology. Upstream's `idle_parts.size() == n_parts`
++    // would never hold and stage_transition would index glb_all_parts[-1].
++    if (n_parts == 0) {
++        return !idle_parts.empty();
++    }
+     return (int)idle_parts.size() == n_parts;
+ }
+ 
+@@ -503,7 +509,12 @@ void stage_transition(bool has_event)
+     }
+     case STAGE_CONVERGE: {
+         if (!local_stage_end) {
+-            if (gettime_ns() - last_event_ts < CONVERGE_TIMEOUT) {
++            // AnyREAL: allow a longer observation window for real-time runs.
++            static long converge_timeout = [] {
++                const char *s = getenv("ANYREAL_CONVERGE_SEC");
++                return s ? atol(s) * 1'000'000'000L : CONVERGE_TIMEOUT;
++            }();
++            if (gettime_ns() - last_event_ts < converge_timeout) {
+                 break;
+             }
+             local_stage_end = true;
