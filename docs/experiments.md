@@ -49,7 +49,16 @@ cd /work && scripts/experiments/run_m2.sh
 `run_m2.sh` は M2 relay（`src/relay/m2_relay.cpp`）と 2 つの未改変 Go プログラムを
 起動し、100 逐次 + 16 並行の echo 接続を検証する。成功時は `M2 PASS`。
 
-## 5. GoBGP を broker で動かす / REAL controller 接続（M3）
+## 5. GoBGP を broker で動かす（M2b）
+
+```bash
+scripts/experiments/run_m2_gobgp.sh
+```
+
+未改変の `gobgpd` 2 台を broker 配下で起動し、M2 relay 経由で BGP session を確立、
+`192.168.1.0/24` の広告・撤回を検証する。成功時は `M2B_GOBGP_PASS`。
+
+## 6. REAL controller 接続（M3）
 
 TODO: `anyreal-run --real` と controller の起動手順を記述。
 

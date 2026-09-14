@@ -570,10 +570,12 @@ class Broker {
         VSock::Pending p = vs->pending.front();
         vs->pending.pop_front();
 
-        // Fill the peer address before handing the fd back.
+        // Fill the peer address before handing the fd back. Our peers are IPv4,
+        // so report an AF_INET peer even when the listener was dual-stack
+        // (GoBGP matches neighbors by IPv4 address).
         if (n->data.args[1] != 0) {
-            write_sockaddr((void *)n->data.args[1], (void *)n->data.args[2],
-                           vs->domain, p.peer_addr, p.peer_port);
+            write_sockaddr((void *)n->data.args[1], (void *)n->data.args[2], AF_INET,
+                           p.peer_addr, p.peer_port);
         }
 
         int sv[2];
@@ -604,7 +606,7 @@ class Broker {
         nv->broker_end = sv[1];
         nv->is_bgp = vs->is_bgp;
         nv->connected = true;
-        nv->domain = vs->domain;
+        nv->domain = AF_INET;
         nv->peer_id = p.peer_id;
         nv->peer_addr = p.peer_addr;
         nv->peer_port = p.peer_port;
