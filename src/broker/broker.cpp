@@ -59,6 +59,30 @@ void set_timeout(int fd, int seconds) {
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 }
 
+// seccomp_notif.pid is a thread id (tid). Normalize to the process id (tgid) so
+// that a process's sockets are identified consistently across its threads.
+pid_t tgid_of(pid_t tid) {
+    static std::unordered_map<pid_t, pid_t> cache;
+    auto it = cache.find(tid);
+    if (it != cache.end()) return it->second;
+    char path[64];
+    snprintf(path, sizeof(path), "/proc/%d/status", (int)tid);
+    pid_t tgid = tid;
+    FILE *f = fopen(path, "r");
+    if (f) {
+        char line[256];
+        while (fgets(line, sizeof(line), f)) {
+            if (strncmp(line, "Tgid:", 5) == 0) {
+                tgid = (pid_t)atoi(line + 5);
+                break;
+            }
+        }
+        fclose(f);
+    }
+    cache[tid] = tgid;
+    return tgid;
+}
+
 int write_all(int fd, const void *buf, size_t n) {
     const char *p = static_cast<const char *>(buf);
     size_t off = 0;
@@ -115,6 +139,7 @@ enum class FdKind { BrokerEnd, Backhaul, Listen };
 
 struct VSock {
     int app_fd = -1;
+    pid_t owner_pid = 0;
     int app_ref = -1;    // broker's copy of the target-side end (sv[0])
     int broker_end = -1; // broker's end of the data socketpair (sv[1])
 
@@ -266,7 +291,7 @@ class Broker {
         if (vs->app_ref >= 0) close(vs->app_ref);
         for (auto &p : vs->pending) close(p.fd);
         vs->pending.clear();
-        if (vs->app_fd >= 0) by_app_fd_.erase(vs->app_fd);
+        if (vs->app_fd >= 0) by_app_fd_.erase(appkey(vs->owner_pid, vs->app_fd));
     }
 
     // ---- notification helpers ---------------------------------------------
@@ -287,11 +312,11 @@ class Broker {
         r->flags = SECCOMP_USER_NOTIF_FLAG_CONTINUE;
     }
 
-    VSock *find(int app_fd) {
-        auto it = by_app_fd_.find(app_fd);
+    VSock *find(pid_t pid, int app_fd) {
+        auto it = by_app_fd_.find(appkey(pid, app_fd));
         if (getenv("ANYREAL_DEBUG"))
-            fprintf(stderr, "[broker] find(%d) map=%zu -> %s\n", app_fd, by_app_fd_.size(),
-                    it == by_app_fd_.end() ? "nil" : "hit");
+            fprintf(stderr, "[broker] find(pid=%d fd=%d) map=%zu -> %s\n", (int)pid, app_fd,
+                    by_app_fd_.size(), it == by_app_fd_.end() ? "nil" : "hit");
         return it == by_app_fd_.end() ? nullptr : it->second.get();
     }
 
@@ -315,6 +340,7 @@ class Broker {
     }
 
     bool handle(struct seccomp_notif *n, struct seccomp_notif_resp *resp) {
+        cur_pid_ = tgid_of(n->pid);
         notif_total_++;
         syscall_counts_[n->data.nr]++;
         if (getenv("ANYREAL_DEBUG"))
@@ -380,11 +406,12 @@ class Broker {
             fprintf(stderr, "[broker] socket AF_INET type=0x%x -> appfd=%d\n", type, appfd);
         auto vs = std::make_unique<VSock>();
         vs->app_fd = appfd;
+        vs->owner_pid = cur_pid_;
         vs->app_ref = sv[0];
         vs->broker_end = sv[1];
         vs->domain = domain;
         VSock *raw = vs.get();
-        by_app_fd_[appfd] = std::move(vs);
+        by_app_fd_[appkey(cur_pid_, appfd)] = std::move(vs);
         if (getenv("ANYREAL_DEBUG"))
             fprintf(stderr, "[broker] inserted vsock appfd=%d map=%zu\n", appfd,
                     by_app_fd_.size());
@@ -396,7 +423,7 @@ class Broker {
     bool read_sockaddr(const void *remote, socklen_t len, in_addr_t *v4, uint16_t *port) {
         uint8_t raw[sizeof(struct sockaddr_in6)];
         if (len < 2 || len > sizeof(raw)) return false;
-        if (read_mem(target_pid_, remote, raw, len) != (ssize_t)len) return false;
+        if (read_mem(cur_pid_, remote, raw, len) != (ssize_t)len) return false;
         uint16_t fam = 0;
         memcpy(&fam, raw, 2);
         if (fam == AF_INET) {
@@ -442,20 +469,20 @@ class Broker {
                 sin6.sin6_addr.s6_addr[10] = 0xff;
                 sin6.sin6_addr.s6_addr[11] = 0xff;
                 memcpy(&sin6.sin6_addr.s6_addr[12], &v4, 4);
-                write_mem(target_pid_, addr, &sin6, sizeof(sin6));
+                write_mem(cur_pid_, addr, &sin6, sizeof(sin6));
             } else {
                 struct sockaddr_in sin;
                 memset(&sin, 0, sizeof(sin));
                 sin.sin_family = AF_INET;
                 sin.sin_addr.s_addr = v4;
                 sin.sin_port = htons(port);
-                write_mem(target_pid_, addr, &sin, sizeof(sin));
+                write_mem(cur_pid_, addr, &sin, sizeof(sin));
             }
         }
         if (addrlen_p) {
             socklen_t len = (domain == AF_INET6) ? sizeof(struct sockaddr_in6)
                                                  : sizeof(struct sockaddr_in);
-            write_mem(target_pid_, addrlen_p, &len, sizeof(len));
+            write_mem(cur_pid_, addrlen_p, &len, sizeof(len));
         }
     }
 
@@ -463,7 +490,7 @@ class Broker {
 
     bool do_bind(struct seccomp_notif *n, struct seccomp_notif_resp *resp) {
         int fd = (int)n->data.args[0];
-        VSock *vs = find(fd);
+        VSock *vs = find(cur_pid_, fd);
         if (getenv("ANYREAL_DEBUG"))
             fprintf(stderr, "[broker] bind fd=%d vsock=%p\n", fd, (void *)vs);
         if (!vs) {
@@ -490,7 +517,7 @@ class Broker {
 
     bool do_listen(struct seccomp_notif *n, struct seccomp_notif_resp *resp) {
         int fd = (int)n->data.args[0];
-        VSock *vs = find(fd);
+        VSock *vs = find(cur_pid_, fd);
         if (!vs) {
             resp_continue(resp, n->id);
             return true;
@@ -515,7 +542,7 @@ class Broker {
 
     bool do_connect(struct seccomp_notif *n, struct seccomp_notif_resp *resp) {
         int fd = (int)n->data.args[0];
-        VSock *vs = find(fd);
+        VSock *vs = find(cur_pid_, fd);
         if (!vs) {
             resp_continue(resp, n->id);
             return true;
@@ -593,7 +620,7 @@ class Broker {
     bool do_accept(struct seccomp_notif *n, struct seccomp_notif_resp *resp,
                    bool is_accept4) {
         int fd = (int)n->data.args[0];
-        VSock *vs = find(fd);
+        VSock *vs = find(cur_pid_, fd);
         if (getenv("ANYREAL_DEBUG"))
             fprintf(stderr, "[broker] accept fd=%d listener=%d pending=%zu\n", fd,
                     vs ? (int)vs->is_listener : -1, vs ? vs->pending.size() : 0);
@@ -640,6 +667,7 @@ class Broker {
 
         auto nv = std::make_unique<VSock>();
         nv->app_fd = appfd;
+        nv->owner_pid = cur_pid_;
         nv->app_ref = sv[0];
         nv->broker_end = sv[1];
         nv->is_bgp = vs->is_bgp;
@@ -652,7 +680,7 @@ class Broker {
         nv->self_port = vs->self_port;
         nv->backhaul_fd = p.fd;
         VSock *raw = nv.get();
-        by_app_fd_[appfd] = std::move(nv);
+        by_app_fd_[appkey(cur_pid_, appfd)] = std::move(nv);
         track(sv[1], raw, FdKind::BrokerEnd);
         track(p.fd, raw, FdKind::Backhaul);
         return false; // ADDFD already sent the response
@@ -661,7 +689,7 @@ class Broker {
     bool do_getname(struct seccomp_notif *n, struct seccomp_notif_resp *resp,
                     bool self) {
         int fd = (int)n->data.args[0];
-        VSock *vs = find(fd);
+        VSock *vs = find(cur_pid_, fd);
         if (!vs) {
             resp_continue(resp, n->id);
             return true;
@@ -681,7 +709,7 @@ class Broker {
 
     bool do_getsockopt(struct seccomp_notif *n, struct seccomp_notif_resp *resp) {
         int fd = (int)n->data.args[0];
-        VSock *vs = find(fd);
+        VSock *vs = find(cur_pid_, fd);
         if (!vs) {
             resp_continue(resp, n->id);
             return true;
@@ -691,7 +719,7 @@ class Broker {
         void *optval = (void *)n->data.args[3];
         void *optlen_p = (void *)n->data.args[4];
         socklen_t optlen = 0;
-        if (optlen_p) read_mem(target_pid_, optlen_p, &optlen, sizeof(optlen));
+        if (optlen_p) read_mem(cur_pid_, optlen_p, &optlen, sizeof(optlen));
 
         char buf[256];
         memset(buf, 0, sizeof(buf));
@@ -752,15 +780,15 @@ class Broker {
         }
         if (out > optlen && optlen != 0) out = optlen;
         if (out > sizeof(buf)) out = sizeof(buf);
-        if (optval && out) write_mem(target_pid_, optval, buf, out);
-        if (optlen_p) write_mem(target_pid_, optlen_p, &out, sizeof(out));
+        if (optval && out) write_mem(cur_pid_, optval, buf, out);
+        if (optlen_p) write_mem(cur_pid_, optlen_p, &out, sizeof(out));
         resp_ok(resp, n->id, 0);
         return true;
     }
 
     bool do_setsockopt(struct seccomp_notif *n, struct seccomp_notif_resp *resp) {
         int fd = (int)n->data.args[0];
-        VSock *vs = find(fd);
+        VSock *vs = find(cur_pid_, fd);
         if (!vs) {
             resp_continue(resp, n->id);
             return true;
@@ -769,7 +797,7 @@ class Broker {
         int opt = (int)n->data.args[2];
         if (level == IPPROTO_TCP && opt == TCP_NODELAY) {
             int v = 0;
-            read_mem(target_pid_, (void *)n->data.args[3], &v, sizeof(v));
+            read_mem(cur_pid_, (void *)n->data.args[3], &v, sizeof(v));
             vs->nodelay = v != 0;
         }
         resp_ok(resp, n->id, 0);
@@ -778,7 +806,7 @@ class Broker {
 
     bool do_shutdown(struct seccomp_notif *n, struct seccomp_notif_resp *resp) {
         int fd = (int)n->data.args[0];
-        VSock *vs = find(fd);
+        VSock *vs = find(cur_pid_, fd);
         if (!vs) {
             resp_continue(resp, n->id);
             return true;
@@ -793,7 +821,7 @@ class Broker {
 
     bool do_close(struct seccomp_notif *n, struct seccomp_notif_resp *resp) {
         int fd = (int)n->data.args[0];
-        auto it = by_app_fd_.find(fd);
+        auto it = by_app_fd_.find(appkey(cur_pid_, fd));
         if (it != by_app_fd_.end()) {
             destroy(it->second.get());
         }
@@ -1126,7 +1154,11 @@ class Broker {
     pid_t target_pid_;
     BrokerConfig cfg_;
     int epfd_ = -1;
-    std::unordered_map<int, std::unique_ptr<VSock>> by_app_fd_;
+    static uint64_t appkey(pid_t pid, int fd) {
+        return ((uint64_t)(uint32_t)pid << 32) | (uint32_t)fd;
+    }
+    pid_t cur_pid_ = 0;
+    std::unordered_map<uint64_t, std::unique_ptr<VSock>> by_app_fd_;
     std::unordered_map<int, FdCtx> fd_ctx_;
     std::unordered_map<int, Peer> by_peer_id_;
     std::unordered_map<in_addr_t, int> by_peer_addr_;

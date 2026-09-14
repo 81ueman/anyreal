@@ -138,6 +138,18 @@ M6 の結論（方針）:
 cEOS では「対象プロセスには実 TCP ソケットを持たせ、`connect()` を broker 側のローカル中継へ
 向ける」方式（ソケットオブジェクトを置換しない）を検討する。
 
+### B: broker の多プロセス対応（実装済み・回帰なし）
+
+- `seccomp_notif.pid` は tid のため、`/proc/<tid>/status` の Tgid でプロセス単位に正規化。
+- fd table を `(tgid, fd)` でキー化。`process_vm_readv/writev` は通知元プロセスの tgid に対して実行。
+- これにより PID1 に filter を入れ子孫へ継承させる構成（cEOS の systemd/ProcMgr/Bgp）で、
+  複数プロセスの socket を 1 つの broker が扱える。
+- 単一プロセス（GoBGP）の M2/M3 は回帰なしで成功を確認。
+
+次段: D の示唆に沿い、cEOS では socketpair ではなく **実 TCP ソケットを維持**したまま
+`connect()` を broker の中継先へ向ける方式を実装する（Arnet のオプション検証を満たすため）。
+
+
 
 
 
