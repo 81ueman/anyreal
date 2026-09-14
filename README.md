@@ -62,3 +62,10 @@ PoC 1（GoBGP）の主要経路が成立。未改変 GoBGP 2 ノードを seccom
 本リポジトリは上流 REAL の派生物を含む。参照 commit と変更点は
 [`docs/upstream.md`](docs/upstream.md) に記録する。上流コードの再配布条件は確認中であり、
 取り込んだコードの既存の権利表示は保持する。
+
+- **AnyREAL 本体**（`src/`, `scripts/`, `tests/`, `docs/` など）: [MIT License](LICENSE)。
+- **`patches/`**: 上流 REAL（参照 commit `52f440cfb597fe9440ed3e862f98bd5bbf9171c4`）の
+  ファイルに対する差分であり、**本リポジトリの MIT ライセンスの対象外**。上流の権利表示を
+  保持し、上流のライセンス条件に従う。上流リポジトリに LICENSE/COPYING は確認できていない。
+  上流コードそのものは本リポジトリに含めていない（`third_party/` は `.gitignore` 済み）。
+
