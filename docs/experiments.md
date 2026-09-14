@@ -131,6 +131,29 @@ gcc -shared -fPIC -O2 -o build/libprobe.so src/probe/probe.c -ldl
 `/tmp/anyreal-probe.log` に libc wrapper 経由の `socket`/`connect`/`accept4` が出る。
 cEOS `Bgp` では `connect(fd, <peer>:179)` が記録され、libc 経由であることを確認済み。
 
+## 9. cEOS への AnyREAL 適用（M6, 進行中）
+
+cEOS は AlmaLinux 9.7 / glibc 2.34 のため、preload は同系列でビルドする:
+
+```bash
+docker run --rm --platform linux/arm64 \
+  -v "$PWD/third_party/REAL/preload":/src -w /src almalinux:9 \
+  bash -c 'dnf install -y gcc-c++ make && make clean; make IMAGE_CEOS=1'
+```
+
+注入は全体の `/etc/ld.so.preload` ではなく、`Bgp` だけをラップする:
+
+```bash
+mv /usr/bin/Bgp /usr/bin/Bgp.real
+printf '#!/bin/bash\nexport LD_PRELOAD=/usr/lib/libpreload.so\nexec /usr/bin/Bgp.real "$@"\n' > /usr/bin/Bgp
+chmod 755 /usr/bin/Bgp
+printf 'NODE_ID=1\nPEER_LIST=10.30.0.2:10.30.0.3:2,\nBASE_TS=0\nRT_BASE_TS=0\nMONO_RAW_BASE_TS=0\n' > /real_env
+```
+
+現状 `IMAGE_CEOS` で NETLINK 仮想化・`add_if`・`set_nht_ready` を無効化しても `Bgp` が
+preload 下で abort するため、M6 は原因切り分けが必要（`docs/compatibility.md` 参照）。
+
+
 
 
 

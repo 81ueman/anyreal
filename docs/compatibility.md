@@ -99,6 +99,22 @@ cEOS は多プロセスなので PID1 へ filter を入れて子孫へ継承さ�
 通知元プロセス（`seccomp_notif.pid`）ごとに fd table・メモリ操作を行う対応が必要。
 M6 ではどちらを使うか（併用含む）を、実 socket の捕捉結果で決める。
 
+## cEOS AnyREAL（M6a: 現状）
+
+| 項目 | 値 | 状態 |
+| --- | --- | --- |
+| preload のビルド | cEOS は AlmaLinux 9.7 / glibc 2.34 のため、同系列の `almalinux:9` で `make IMAGE_CEOS=1` してビルド | 確認済み |
+| 注入方法 | 全体の `/etc/ld.so.preload` は cEOS を壊す。`/usr/bin/Bgp` を wrapper にして `LD_PRELOAD` を設定する方式が有効 | 確認済み |
+| hijack 対象 | `IMAGE_CEOS` で `__progname == "Bgp"` に限定。NETLINK は native 維持 | 実装済み |
+| `Bgp` 起動 | wrapper + preload で `Bgp` は `add_if`/`set_nht_ready` を回避すると起動が進むが、その後 NOS 内部で abort | 未達（要対応） |
+
+M6a の残作業:
+- `Bgp` が preload 下で abort する原因の特定（preload が fd/挙動を変えることによる
+  NOS 内部 assert の可能性）。REAL 固有の順序制御（`set_nht_ready`）や NETLINK 仮想化を
+  外した状態で、どの前提が崩れているかを切り分ける。
+- cEOS の BGP socket だけを対象にするための最小 hijack（port 179 / peer アドレス限定）の検討。
+
+
 
 `Bgp` が libc リンクであることは、元 REAL の `LD_PRELOAD` 方式が cEOS の BGP にも
 適用できる可能性を示す。AnyREAL の seccomp broker でも同じ境界を扱える。M6 では

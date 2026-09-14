@@ -1,5 +1,5 @@
 diff --git a/preload/Makefile b/preload/Makefile
-index fb3ff5b..3003e60 100644
+index fb3ff5b..c3a1270 100644
 --- a/preload/Makefile
 +++ b/preload/Makefile
 @@ -2,6 +2,9 @@ all: libpreload.so
@@ -12,7 +12,18 @@ index fb3ff5b..3003e60 100644
  ifeq ($(LOGONLY), 1)
  	cppflags += -DLOG_ONLY
  endif
-@@ -36,7 +39,7 @@ HDR_FILES = debug.h\
+@@ -18,6 +21,10 @@ ifeq ($(IMAGE_BIRD), 1)
+ 	cppflags += -DIMAGE_BIRD
+ endif
+ 
++ifeq ($(IMAGE_CEOS), 1)
++	cppflags += -DIMAGE_CEOS
++endif
++
+ SRC_FILES = preload.cpp\
+ 	preload_nohdr.cpp\
+ 	netlink.cpp\
+@@ -36,7 +43,7 @@ HDR_FILES = debug.h\
  	util.h
  
  libpreload.so: ${SRC_FILES} ${HDR_FILES} Makefile
@@ -35,7 +46,7 @@ index 44e607a..7ae674d 100644
      fcntl_orig(fd, F_SETFD, flags | FD_CLOEXEC);
      fd2ptr_[fd] = nullptr;
 diff --git a/preload/preload.cpp b/preload/preload.cpp
-index 8fcf0b4..07c7f43 100644
+index 8fcf0b4..0e29420 100644
 --- a/preload/preload.cpp
 +++ b/preload/preload.cpp
 @@ -99,7 +99,7 @@ void initialize_port() {
@@ -56,6 +67,57 @@ index 8fcf0b4..07c7f43 100644
      if (fd == -1) {
          return NULL;
      }
+@@ -574,6 +574,9 @@ void lib_init()
+             .peerid = peerid
+         };
+         LOG("self ip: %s, peer ip: %s, peerid: %d\n", sipstr_buf, pipstr_buf, peerid);
++#ifndef IMAGE_CEOS
++        // AnyREAL/cEOS keeps NETLINK native, so virtual veth interfaces are not
++        // registered here (this path also assumes REAL's netlink emulation).
+         std::string ifname = "eth" + std::to_string(tls_selfid) + "to" + std::to_string(peerid);
+         __u8 *sip_chararr = (__u8 *)&sip;
+         add_if(alloc_ifidx(), ifname, IFTYPE_VETH, {.s_addr = sip}, {.s_addr = pip}, {
+@@ -590,10 +593,13 @@ void lib_init()
+             .hw_addr_len = 6,
+             .hw_addr = {__u8(0xFF), __u8(0xFF), __u8(0xFF), __u8(0xFF), __u8(0xFF), __u8(0xFF)}
+         });
++#endif
+     }
+ 
++#ifndef IMAGE_CEOS
+     glb_fdset.set_nht_ready(tls_selfid);
+     log_user_info();
++#endif
+     std::string progname = get_tname();
+     LOG("%d: %s\n", gettid(), progname.c_str());
+ 
+@@ -1156,17 +1162,24 @@ socket_impl(int domain, int type, int protocol)
+ {
+     PRELOAD_ORIG(socket);
+     if (domain == AF_INET && type == SOCK_STREAM && (protocol == 0 || protocol == IPPROTO_TCP) &&
+-#ifdef IMAGE_CRPD
++#if defined(IMAGE_CRPD)
+         strncmp(__progname, "rpd", 3) == 0 && strlen(__progname) == 3
++#elif defined(IMAGE_CEOS)
++        // AnyREAL: only cEOS's BGP daemon owns the virtualized BGP sockets.
++        // Other NOS processes must keep their normal TCP behaviour.
++        strcmp(__progname, "Bgp") == 0
+ #else
+         true
+ #endif
+     ) {
+         return socket_inet_impl(domain, type, protocol);
+     } else if (domain == AF_NETLINK &&
+-#ifdef IMAGE_CRPD
++#if defined(IMAGE_CRPD)
+         strncmp(__progname, "rpd", 3) == 0 && strlen(__progname) == 3 &&
+         protocol == NETLINK_ROUTE
++#elif defined(IMAGE_CEOS)
++        // Keep NETLINK native for cEOS (other agents depend on it).
++        false
+ #else
+         true
+ #endif
 diff --git a/preload/preload.h b/preload/preload.h
 index fa77f93..f612f05 100644
 --- a/preload/preload.h

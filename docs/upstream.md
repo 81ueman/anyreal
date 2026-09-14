@@ -65,7 +65,7 @@ typedef struct { real_hdr_t hdr; int32_t src_id; int32_t dst_id; } real_pld_t;
 
 | パッチ | 対象 | 内容 | 理由 |
 | --- | --- | --- | --- |
-| `0001-preload-arm64-port.patch` | `preload/` | `-mcx16` を x86_64 以外では外す。`SYS_open`/`SYS_dup2` を `openat`/`dup3` に置換 | ARM64 に存在しない |
+| `0001-preload-arm64-and-ceos.patch` | `preload/` | `-mcx16` を x86_64 以外では外す。`SYS_open`/`SYS_dup2` を `openat`/`dup3` に置換。`IMAGE_CEOS` を追加し、hijack を `Bgp` プロセスに限定。NETLINK 仮想化・`add_if`・`set_nht_ready`/`log_user_info` を cEOS では無効化 | ARM64 非対応と cEOS との前提差 |
 | `0002-controller-gobgp-adapter.patch` | `controller/node_ops.cpp` | `image == "gobgp"` の起動・停止・再起動・RIB 出力を追加。`anyreal-run` を起動し broker 経由で接続 | NOS adapter（PLAN.md §4.2） |
 | `0003-controller-single-part-convergence.patch` | `controller/main.cpp` | 単一 part（非 iterative）で `globally_converged()` が成立せず `glb_all_parts[-1]` を参照して落ちる問題を修正。`ANYREAL_CONVERGE_SEC` で観測窓を延長可能に | v0.1 の通常実行モード |
 
