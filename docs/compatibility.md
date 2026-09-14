@@ -166,6 +166,28 @@ cEOS では「対象プロセスには実 TCP ソケットを持たせ、`connec
 実 TCP へのフォールバックは不要になった。broker を cEOS へ適用する場合も同じ
 `store_opt`/`replay_opt` 相当を broker 側に持たせればよい。）
 
+### M6 統合の状況（あと一歩）
+
+`scripts/experiments/run_m6_ceos.sh` を追加: 2 台の cEOS を preload 付きで起動し、
+controller を `ceos` トポロジ（`conf/ceos/topo2`）で起動、共有 `/ripc` 経由で BGP を
+確立する。`node_ops.cpp` に `ceos` の no-op アダプタを追加。
+
+確認できたこと:
+- cEOS の `Bgp` が preload 下で起動し、BGP connect 段で abort しない。
+- `/ripc/emu-real-<i>/listener:179`（listener）と `/ripc/emu-real-<i>/<peer>`（connector）が
+  両ノードに作成される。
+- ceos1 は BGP で `OpenSent` まで進む（controller へ OPEN を送信している）。
+
+未成立:
+- controller の `n_channel` が 0 のまま。connector の payload が対向 listener チャネルへ
+  中継されず、ceos2 は `Active`、ceos1 は `OpenSent` のまま留まる。
+- DEBUG ビルドの controller は `logPath/ctrl/` 未作成で落ちる等、ログ取得に難がある。
+
+次の切り分け:
+- controller の `try_buildup` が node2 の listener へ connect できているか、payload が
+  replay manager から (2,1) チャネルへ送られているかを、DEBUG ログを安定化して確認する。
+
+
 
 
 

@@ -1,5 +1,5 @@
 diff --git a/controller/node_ops.cpp b/controller/node_ops.cpp
-index f7a716c..a7ccb32 100644
+index f7a716c..52214a2 100644
 --- a/controller/node_ops.cpp
 +++ b/controller/node_ops.cpp
 @@ -8,6 +8,7 @@
@@ -24,16 +24,21 @@ index f7a716c..a7ccb32 100644
  struct ExecResult {
      // 2 parts:
      // - normally exited or not (WIFEXITED(status))
-@@ -115,6 +123,8 @@ void stop_nodes(const std::string& image, const std::unordered_set<int>& nodes,
+@@ -115,6 +123,13 @@ void stop_nodes(const std::string& image, const std::unordered_set<int>& nodes,
                  cmds = stop_daemons_cmds_bird("emu-real-" + std::to_string(node));
              } else if (image == "crpd") {
                  cmds = stop_daemons_cmds_crpd("emu-real-" + std::to_string(node));
 +            } else if (image == "gobgp") {
 +                cmds = stop_daemons_cmds_gobgp(node);
++            } else if (image == "ceos") {
++                // cEOS nodes are started outside the controller (preload +
++                // /ripc shared volume); BGP is configured after the controller
++                // is up, so nothing to tear down here.
++                cmds = {};
              } else {
                  dbg_assert(0, "Unimplemented stop_nodes() for image %s\n", image.c_str());
              }
-@@ -155,6 +165,39 @@ std::vector<std::string> start_daemons_cmds_bird(const std::string &node_name) {
+@@ -155,6 +170,39 @@ std::vector<std::string> start_daemons_cmds_bird(const std::string &node_name) {
      };
  }
  
@@ -73,29 +78,35 @@ index f7a716c..a7ccb32 100644
  void start_daemons_crpd(const std::string &node_name, const std::string &logPath) {
      execInst("./lwc/target/release/lwc start " + node_name + " /sbin/runit-init.sh", logPath);
      execInst("./lwc/target/release/lwc exec " + node_name + " mkdir -p /var/license/", logPath);
-@@ -192,6 +235,8 @@ void start_nodes(const std::string& image,
+@@ -192,6 +240,10 @@ void start_nodes(const std::string& image,
                  cmds = start_daemons_cmds_frr(node_name);
              } else if (image == "bird") {
                  cmds = start_daemons_cmds_bird(node_name);
 +            } else if (image == "gobgp") {
 +                cmds = start_daemons_cmds_gobgp(node_name, node, neighborList, logPath);
++            } else if (image == "ceos") {
++                cmds = {};
              } else {
                  dbg_assert(0, "Unimplemented start_nodes() for image %s\n", image.c_str());
              }
-@@ -225,6 +270,8 @@ void restart_nodes(const std::string& image,
+@@ -225,6 +277,10 @@ void restart_nodes(const std::string& image,
                  cmds = start_daemons_cmds_frr(node_name);
              } else if (image == "bird") {
                  cmds = start_daemons_cmds_bird(node_name);
 +            } else if (image == "gobgp") {
 +                cmds = start_daemons_cmds_gobgp(node_name, node, neighborList, logPath);
++            } else if (image == "ceos") {
++                cmds = {};
              } else {
                  dbg_assert(0, "Unimplemented restart_nodes() for image %s\n", image.c_str());
              }
-@@ -291,6 +338,8 @@ void export_routes(const std::string& image, const std::unordered_set<int>& node
+@@ -291,6 +347,10 @@ void export_routes(const std::string& image, const std::unordered_set<int>& node
              cmds = export_routes_cmds_bird("emu-real-" + std::to_string(node), tag);
          } else if (image == "crpd") {
              cmds = export_routes_cmds_crpd("emu-real-" + std::to_string(node), tag);
 +        } else if (image == "gobgp") {
++            cmds = {};
++        } else if (image == "ceos") {
 +            cmds = {};
          } else {
              dbg_assert(0, "Unimplemented export_routes() for image %s\n", image.c_str());
