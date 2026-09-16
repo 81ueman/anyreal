@@ -46,8 +46,9 @@ start_node() {
     local name="$1" id="$2" ip="$3" peers="$4"
     docker run -d --name "${name}" --privileged --network "${NET}" --ip "${ip}" \
         -v "${VOL}:/ripc" -v "${RUN}:/usr/local/bin/anyreal-run:ro" \
+        -e ANYREAL_DEBUG=1 \
         "${CEOS_ENV[@]}" "${IMG}" \
-        /usr/local/bin/anyreal-run --supervise-self --no-inet6 --node "${id}" --peers "${peers}" \
+        /usr/local/bin/anyreal-run --supervise-self --node "${id}" --peers "${peers}" \
         --real --ripc /ripc --mng /ripc/msg_manager_socket -- \
         /sbin/init systemd.setenv="CEOS=1" systemd.setenv="EOS_PLATFORM=ceoslab" \
         systemd.setenv="container=docker" systemd.setenv="ETBA=1" \

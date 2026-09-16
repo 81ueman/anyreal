@@ -75,7 +75,16 @@ preload を使わない統一経路として、cEOS の PID1 を `anyreal-run --
   例: node1 が `Estab`、node2 が `Active` の**非対称**。controller の `n_channel` は 0 のまま。
   AF_INET/AF_INET6 の経路混在が原因候補で、broker 統一は追加作業が必要。
 
-現状の成立経路は preload（M6）と混在構成（MIXED4）。broker 統一は継続課題。
+診断（broker デバッグログ）:
+- `--no-inet6` では cEOS は BGP リスナーを **AF_INET6（native）** で作るため仮想リスナーが
+  作られず、broker の `accept` は native fd に対して呼ばれる（`accept fd=5 listener=-1`）。
+  controller は `/ripc/.../listener:179` に接続するが cEOS はそこを accept しない → 非対称。
+- 一方 `--no-inet6` を外して AF_INET6 も仮想化すると、cEOS の boot が停止（systemd が
+  AF_INET6 stream socket を多用するため、broker が詰まる）。
+→ **ジレンマ**: boot を守ると listener が native、listener を仮想化すると boot が停止。
+
+現状の成立経路は preload（M6）と混在構成（MIXED4）。broker 統一は継続課題（AF_INET6
+ストリームを native のまま listener だけ別経路で扱う設計、または broker の非阻塞/多重化が必要）。
 
 ## M5 調査の残項目（依存関係）
 
