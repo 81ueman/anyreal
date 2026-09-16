@@ -59,9 +59,10 @@ start_node2
 echo "-- initial establishment --"
 wait_established || { echo "FAILED: initial session"; tail -5 "${LOGDIR}"/*.log; exit 1; }
 "${GOBGP}" -p 50071 global rib add 192.168.1.0/24
-sleep 2
+found=0
+for _ in $(seq 1 20); do "${GOBGP}" -p 50072 global rib 2>/dev/null | grep -q '192.168.1.0/24' && { found=1; break; }; sleep 1; done
 "${GOBGP}" -p 50072 global rib | tee "${LOGDIR}/node2.rib.initial.txt"
-grep -q '192.168.1.0/24' "${LOGDIR}/node2.rib.initial.txt" || { echo "FAILED: prefix not propagated"; exit 1; }
+[ "${found}" = 1 ] || { echo "FAILED: prefix not propagated"; exit 1; }
 echo "initial: Established and prefix propagated"
 
 # Kill live (non-zombie) processes whose command line contains the pattern.
@@ -98,7 +99,8 @@ echo "-- restart node2 --"
 start_node2
 wait_established || { echo "FAILED: session did not recover"; tail -8 "${LOGDIR}/node2.log"; exit 1; }
 echo "reconnected: Established"
-sleep 2
+found=0
+for _ in $(seq 1 20); do "${GOBGP}" -p 50072 global rib 2>/dev/null | grep -q '192.168.1.0/24' && { found=1; break; }; sleep 1; done
 "${GOBGP}" -p 50072 global rib | tee "${LOGDIR}/node2.rib.after.txt"
-grep -q '192.168.1.0/24' "${LOGDIR}/node2.rib.after.txt" || { echo "FAILED: route not re-advertised"; exit 1; }
+[ "${found}" = 1 ] || { echo "FAILED: route not re-advertised"; exit 1; }
 echo "M2_RECONNECT_PASS (logs in ${LOGDIR})"

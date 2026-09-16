@@ -89,8 +89,10 @@ broker の非阻塞化（per-process 多重化・非同期ハンドシェイク�
 
 ## 再接続（peer stop/restart）の現状
 
-- GoBGP（M2 relay）: peer 停止で session が落ちることは確認済み。relay の再ペアリングも
-  確認したが、BGP 再確立の完了は未確認。
+- GoBGP（M2 relay, `run_m2_reconnect.sh`）: peer 停止で session が落ちること、および
+  **peer 再起動後に session が再確立（Established）する**ことを確認。
+  ただし **経路の再広告は今回観測できず**（node2 の RIB が空のまま）。GoBGP の Adj-RIB-Out
+  再送タイミング/条件の確認が必要。テストは `M2_RECONNECT_PASS` に達していない（部分成功）。
 - GoBGP/cEOS（REAL controller）: controller は `try_buildup` を STAGE_BUILDUP でのみ実行し、
   CONVERGE 中の再接続は `restart_nodes`（STAGE 遷移）経由でしか再構築しない。したがって
   実行中の任意タイミングの peer 再起動は未対応。iterative convergence / 2-phase の導入時に
