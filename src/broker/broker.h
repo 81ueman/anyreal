@@ -36,6 +36,7 @@ struct BrokerConfig {
     std::string ripc_dir = "/ripc";
     bool use_real = false;     // M3: talk the REAL controller protocol
     std::string mng_socket = "/ripc/msg_manager_socket";
+    bool virtualize_inet6 = true; // false: leave AF_INET6 sockets native (cEOS)
 };
 
 // Runs the broker loop until the target exits. Returns the target exit status.

@@ -159,6 +159,8 @@ int main(int argc, char **argv) {
             cfg.use_real = false;
         } else if (a == "--real") {
             cfg.use_real = true;
+        } else if (a == "--no-inet6") {
+            cfg.virtualize_inet6 = false;
         } else if (a == "--mng" && i + 1 < argc) {
             cfg.mng_socket = argv[++i];
         } else if (a == "--ripc" && i + 1 < argc) {

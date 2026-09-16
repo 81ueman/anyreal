@@ -12,6 +12,20 @@ GoBGP v4.9.0（static）。数値は単発のサンプルで、反復・ピン�
 | native | 1.63 s | 70.7 MiB | – | – |
 | AnyREAL (controller) | 1.92 s | 71.0 MiB | 6.7 MiB | 245 MiB |
 
+3 回反復した結果（収束秒 / gobgpd kB / broker kB / controller kB）:
+
+| run | native 収束 | native gobgpd | AnyREAL 収束 | AnyREAL gobgpd | broker | controller |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 1.66 | 70988 | 2.21 | 71584 | 6664 | 250760 |
+| 2 | 1.93 | 70796 | 1.66 | 71020 | 6660 | 250760 |
+| 3 | 1.78 | 70904 | 22.10* | 68664 | 3332 | 250756 |
+| 中央値 | 1.78 | 70904 | 2.21 | 71020 | 6660 | 250760 |
+
+- `*` は poll がタイムアウトした外れ値（観測窓内に Established を検出できず）。AnyREAL は通常
+  1.7〜2.2 s だが、稀に再接続/タイミングで不安定。
+- gobgpd の RSS は両者ほぼ同じ（約 69〜72 MiB）。AnyREAL の追加は broker 約 6.7 MiB/ノードと
+  controller 約 245 MiB（2 ノードでも固定費が大きい）。
+
 - 収束はほぼ同等（+0.3s）。GoBGP 自体の RSS はほぼ同じ。
 - AnyREAL の追加コストは **broker 約 7 MiB/ノード** と **controller 約 245 MiB**。
   controller は 2 ノードでも固定オーバーヘッドが大きい（`MAX_CONNS`/`MAX_CLIENTS` の配列等）。

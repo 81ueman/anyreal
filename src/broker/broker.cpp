@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <poll.h>
 #include <signal.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
@@ -392,6 +393,12 @@ class Broker {
             resp_continue(resp, n->id);
             return true;
         }
+        if (domain == AF_INET6 && !cfg_.virtualize_inet6) {
+            // cEOS creates a real dual-stack (AF_INET6) listener as well; leave it
+            // native and virtualize only the AF_INET one (matches the preload path).
+            resp_continue(resp, n->id);
+            return true;
+        }
         int sv[2];
         if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) < 0) {
             resp_err(resp, n->id, errno);
@@ -611,11 +618,31 @@ class Broker {
         sin.sin_family = AF_INET;
         sin.sin_addr.s_addr = addr;
         sin.sin_port = htons(port);
-        if (connect(fd, reinterpret_cast<struct sockaddr *>(&sin), sizeof(sin)) < 0) {
+        // Non-blocking connect with timeout so the broker never stalls on a
+        // dead/unreachable service (cEOS boot opens many sockets).
+        set_nonblock(fd, true);
+        int r = connect(fd, reinterpret_cast<struct sockaddr *>(&sin), sizeof(sin));
+        if (r < 0 && errno != EINPROGRESS) {
             close(fd);
             return -1;
         }
-        set_nonblock(fd, true);
+        if (r < 0) {
+            struct pollfd p;
+            p.fd = fd;
+            p.events = POLLOUT;
+            p.revents = 0;
+            int pr = poll(&p, 1, 2000);
+            if (pr <= 0 || (p.revents & (POLLERR | POLLHUP))) {
+                close(fd);
+                return -1;
+            }
+            int err = 0;
+            socklen_t l = sizeof(err);
+            if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &l) < 0 || err != 0) {
+                close(fd);
+                return -1;
+            }
+        }
         vs->backhaul_fd = fd;
         vs->peer_addr = addr;
         vs->peer_port = port;
