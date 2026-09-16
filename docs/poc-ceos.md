@@ -58,7 +58,7 @@ ARM64 cEOS-lab を REAL controller の中継路で駆動する PoC の結果。�
   `65003 65002 65001`（GoBGP→cEOS→GoBGP→cEOS を中継）。撤回も成功。
 - これは「runtime 差（Go）と libc 依存 NOS（cEOS）を同じ中継路で同居できる」ことの実証。
 
-## seccomp broker 版での cEOS 適用（B: 試行）
+## seccomp broker 版での cEOS 適用（B: 進行）
 
 preload を使わない統一経路として、cEOS の PID1 を `anyreal-run --real` で監視する方式も試した
 （`scripts/experiments/run_b_ceos.sh`）。
@@ -66,13 +66,16 @@ preload を使わない統一経路として、cEOS の PID1 を `anyreal-run --
 - launcher に **`--supervise-self`** を追加（自分は PID1 のまま対象を exec、子プロセスが broker）。
   これで **systemd が PID1 として起動でき、cEOS の boot は成功**（以前の「telinit が見つからない」
   問題は PID1 でなかったため）。
-- broker 側にも preload と同じ option store/replay を追加。
-- しかし BGP 中継には未到達: broker が **単一スレッド**で cEOS 全プロセスの socket を扱うため、
-  どこかで通知処理が詰まるとプロセスツリー全体が停止し、node が応答不能（Cli も hang）になる。
-  また AF_INET と AF_INET6 の二重 listener で仮想 listener パスが競合する懸念もある。
+- broker の改善:
+  - 外部 connect を **非阻塞 + タイムアウト**（`proxy_real_connect`）。
+  - **`--no-inet6`**：cEOS の AF_INET6 デュアルスタックリスナーは native のままにし、AF_INET のみ
+    仮想化（preload 経路と同条件）。
+  - option store/replay。
+- 結果: cEOS が broker 下で boot し、**BGP メッセージが交換される**（MsgRcvd/MsgSent が増加）。
+  例: node1 が `Estab`、node2 が `Active` の**非対称**。controller の `n_channel` は 0 のまま。
+  AF_INET/AF_INET6 の経路混在が原因候補で、broker 統一は追加作業が必要。
 
-現状は **preload 経路（M6）と混在構成（MIXED4）が成立**。broker 統一は
-broker の非阻塞化（per-process 多重化・非同期ハンドシェイク）と AF_INET6 方針の整理が残課題。
+現状の成立経路は preload（M6）と混在構成（MIXED4）。broker 統一は継続課題。
 
 ## M5 調査の残項目（依存関係）
 
