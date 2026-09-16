@@ -74,6 +74,28 @@ preload を使わない統一経路として、cEOS の PID1 を `anyreal-run --
 現状は **preload 経路（M6）と混在構成（MIXED4）が成立**。broker 統一は
 broker の非阻塞化（per-process 多重化・非同期ハンドシェイク）と AF_INET6 方針の整理が残課題。
 
+## M5 調査の残項目（依存関係）
+
+- **forwarding agent**: cEOS は forwarding agent を含む構成で起動している。停止・省略は
+  制御プレーンへの影響を検証してから判断する（未検証）。資源コストも未計測。
+- **interface 管理**: cEOS の `Management0` に IP を設定して BGP を確立。interface の列挙・
+  状態通知・route 操作は native（NETLINK は仮想化していない）。仮想トポロジーとの整合に
+  必要な範囲は後続で整理する。
+- **filter 継承**: 現状は `/usr/bin/Bgp` を wrapper にして `Bgp` にのみ `LD_PRELOAD` を適用。
+  起動済みプロセスへ後付けはできないため、Bgp 起動時に読み込ませる方式。子孫（Bgp が
+  spawn するもの）にも継承される。
+- **起動時間**: cEOS の boot（systemd 一式）は数十秒。AnyREAL でも boot 自体は native と
+  同様に走る（hijack は Bgp のみ）。
+
+## 再接続（peer stop/restart）の現状
+
+- GoBGP（M2 relay）: peer 停止で session が落ちることは確認済み。relay の再ペアリングも
+  確認したが、BGP 再確立の完了は未確認。
+- GoBGP/cEOS（REAL controller）: controller は `try_buildup` を STAGE_BUILDUP でのみ実行し、
+  CONVERGE 中の再接続は `restart_nodes`（STAGE 遷移）経由でしか再構築しない。したがって
+  実行中の任意タイミングの peer 再起動は未対応。iterative convergence / 2-phase の導入時に
+  整理する（PLAN.md §8）。
+
 ## 次の候補
 
 - seccomp broker 版での cEOS 適用の継続（broker の非阻塞化、AF_INET6 方針）。

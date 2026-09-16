@@ -216,14 +216,36 @@ v0.1は機能成立を必須条件とし、高速化の達成は約束しない�
 
 ## 10. 着手時のチェックリスト
 
-- [ ] 実験用のARM64 LinuxホストまたはVMを決め、kernel・使用可能メモリ・必要なseccomp機能を確認する。
-- [ ] 上流コードの利用条件を確認し、参照commitを固定した開発基点を用意する。
-- [ ] 元REALのビルド設定・依存関係をARM64向けに調整し、移植差分を記録する。
+- [x] 実験用のARM64 LinuxホストまたはVMを決め、kernel・使用可能メモリ・必要なseccomp機能を確認する。
+      → OrbStack の `anyreal-dev`（Ubuntu 24.04 / aarch64、`user_notif` あり）。`docs/compatibility.md`。
+- [x] 上流コードの利用条件を確認し、参照commitを固定した開発基点を用意する。
+      → `third_party/REAL`（`52f440c`、gitignore）、`patches/`、`LICENSE`（MIT、patches は対象外）。
+- [x] 元REALのビルド設定・依存関係をARM64向けに調整し、移植差分を記録する。
+      → `patches/0001-preload-arm64-and-ceos.patch`。
 - [ ] ARM64のFRRイメージを用意し、上流baseline/preloadを小規模で再現して結果を保存する。
-- [ ] GoBGPの版・Linux/arm64バイナリを固定し、通常環境で2ノードBGPを確立する。
+      → `real-frr` ARM64 と lwc 経路は確認済み。上流テスト本体は `perf` 前提のため未実行（別ホスト）。
+- [x] GoBGPの版・Linux/arm64バイナリを固定し、通常環境で2ノードBGPを確立する。
+      → v4.9.0、`scripts/experiments/run_m1_native.sh`。
 - [ ] 広告・撤回・再接続の設定と期待RIBを保存する。
-- [ ] GoBGPのsyscallを採取し、捕捉・native維持・要調査に分類する。
-- [ ] seccomp通知、メモリ操作、ADDFD、Goのepollを組み合わせたM2の最小実験を作る。
-- [ ] cEOS-labのARM64イメージの取得可否・利用可能な版を記録し、M5の開始条件を明確にする。
+      → 広告・撤回は保存済み。再接続は M2 relay で切断まで確認、controller 経由は未。
+- [x] GoBGPのsyscallを採取し、捕捉・native維持・要調査に分類する。
+      → `docs/compatibility.md`（`strace -e trace=%network`）。
+- [x] seccomp通知、メモリ操作、ADDFD、Goのepollを組み合わせたM2の最小実験を作る。
+      → `scripts/experiments/run_m2.sh`（100 逐次 + 16 並行）。
+- [x] cEOS-labのARM64イメージの取得可否・利用可能な版を記録し、M5の開始条件を明確にする。
+      → `ceos:4.36.0.1F`（arm64）。M5〜M7 実施済み。
+
+### 追加で成立した範囲
+
+- M3/M6: 未改変 GoBGP / cEOS を REAL controller 経由で確立・広告・撤回（preload/UDS）。
+- 混在 4 ノード（GoBGP×2 + cEOS×2、同一 controller）。
+- 計測: `docs/measurements.md`。
+
+### 残（このリポジトリの作業）
+
+- B: cEOS を seccomp broker で統一（boot は成功、中継は broker の非阻塞化が課題）。
+- 上流 FRR baseline/preload の再現（perf が使える Linux ホスト）。
+- 再接続（controller 経由）、資源比較の反復・実験ID固定、より大きいトポロジ。
+
 
 実装開始後に追加する文書は、`docs/upstream.md`（由来と差分）、`docs/compatibility.md`（対応表）、`docs/experiments.md`（再現手順）、`docs/decisions/`（検証後の方式選択）を想定する。今はこの計画書を議論と更新の基点とする。
